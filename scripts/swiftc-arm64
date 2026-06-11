@@ -1,0 +1,8 @@
+#!/bin/sh
+# Cross-compile Swift to FreeBSD arm64
+exec /usr/local/swift/bin/swiftc \
+  -target aarch64-unknown-freebsd14.3 \
+  -sdk /opt/freebsd-arm64-sysroot \
+  -resource-dir /opt/swift-aarch64-resources \
+  -use-ld=lld \
+  "$@"
