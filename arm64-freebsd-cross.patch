@@ -11,6 +11,20 @@ index fdc66496a2..7a17a3a740 100644
    set(SWIFT_PRIMARY_VARIANT_SDK_default  "${SWIFT_HOST_VARIANT_SDK}")
    set(SWIFT_PRIMARY_VARIANT_ARCH_default "${SWIFT_HOST_VARIANT_ARCH}")
  
+diff --git a/cmake/modules/AddSwift.cmake b/cmake/modules/AddSwift.cmake
+index 9159e1c298..96827cf8cb 100644
+--- a/cmake/modules/AddSwift.cmake
++++ b/cmake/modules/AddSwift.cmake
+@@ -587,8 +587,8 @@ function(_add_swift_runtime_link_flags target relpath_to_lib_dir bootstrapping)
+       target_link_libraries(${target} PRIVATE ${swiftrt})
+       target_link_libraries(${target} PRIVATE "swiftCore")
+ 
+-      target_link_directories(${target} PRIVATE ${host_lib_dir})
+       target_link_directories(${target} PRIVATE ${host_lib_arch_dir})
++      target_link_directories(${target} PRIVATE ${host_lib_dir})
+ 
+       # At runtime, use swiftCore in the current toolchain.
+       # For building stdlib, LD_LIBRARY_PATH will be set to builder's stdlib
 diff --git a/cmake/modules/Libdispatch.cmake b/cmake/modules/Libdispatch.cmake
 index c8977e42d4..f29d8c6cf2 100644
 --- a/cmake/modules/Libdispatch.cmake
@@ -26,3 +40,29 @@ index c8977e42d4..f29d8c6cf2 100644
      endif()
  
      if("${sdk}" STREQUAL "ANDROID")
+diff --git a/lib/Macros/Sources/SwiftMacros/DebugDescriptionMacro.swift b/lib/Macros/Sources/SwiftMacros/DebugDescriptionMacro.swift
+index f19a6e4ca0..2c22e731ed 100644
+--- a/lib/Macros/Sources/SwiftMacros/DebugDescriptionMacro.swift
++++ b/lib/Macros/Sources/SwiftMacros/DebugDescriptionMacro.swift
+@@ -541,7 +541,7 @@ extension String {
+       return result
+     }
+ 
+-    return self.replacing("$", with: "\\$")
++    return String(self.flatMap { $0 == "$" ? Array("\\$") : [$0] })
+   }
+ }
+ 
+diff --git a/utils/build-script-impl b/utils/build-script-impl
+index 0c77cd4d2f..88e4ddd61e 100755
+--- a/utils/build-script-impl
++++ b/utils/build-script-impl
+@@ -1105,7 +1105,7 @@ function false_true() {
+ CROSS_COMPILE_HOSTS=($CROSS_COMPILE_HOSTS)
+ for t in "${CROSS_COMPILE_HOSTS[@]}"; do
+     case ${t} in
+-        macosx* | iphone* | appletv* | watch* | linux-armv5 | linux-armv6 | linux-armv7 | android-* | openbsd-* | linux-static-* )
++        macosx* | iphone* | appletv* | watch* | linux-armv5 | linux-armv6 | linux-armv7 | android-* | openbsd-* | freebsd-* | linux-static-* )
+             ;;
+         *)
+             echo "Unknown host to cross-compile for: ${t}"

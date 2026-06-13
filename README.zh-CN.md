@@ -5,6 +5,10 @@
 > swift.org 没有任何 FreeBSD aarch64 的 Swift 发行版,FreeBSD ports 里只有 Swift 5.10.1(x86)。
 > 本项目自行交叉编译了 aarch64 的 Swift runtime + stdlib,补齐了这块空白。
 
+> **🎉 更新(2026-06-13):原生自举成功。** 整个 Swift *编译器*(`swift-frontend`,不只是
+> stdlib)已交叉编译到 arm64,并在真 arm64 FreeBSD 板子上原生编译并运行 Swift。详见
+> **[BOOTSTRAP.md](BOOTSTRAP.md)**,以及 release 里的 `seed-toolchain-aarch64-freebsd.tar.gz`。
+
 ## 验证结果(2026-06-11)
 
 真机 NXP DPAA2 板,FreeBSD 14.4-RELEASE arm64:

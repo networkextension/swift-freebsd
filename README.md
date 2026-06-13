@@ -7,6 +7,11 @@ Cross-compile Swift programs from an **x86 FreeBSD 14.x** host to **FreeBSD arm6
 > swift.org ships no Swift distribution for FreeBSD aarch64, and FreeBSD ports only carries Swift 5.10.1 (x86).
 > This project cross-compiles the aarch64 Swift runtime + stdlib from source to fill that gap.
 
+> **🎉 Update (2026-06-13): native self-hosting achieved.** The whole Swift *compiler*
+> (`swift-frontend`, not just the stdlib) has been cross-built for arm64 and now runs on a
+> real arm64 FreeBSD board, natively compiling and running Swift. See **[BOOTSTRAP.md](BOOTSTRAP.md)**
+> and the `seed-toolchain-aarch64-freebsd.tar.gz` release asset.
+
 ## Validation Results (2026-06-11)
 
 Real hardware — NXP DPAA2 board, FreeBSD 14.4-RELEASE arm64:
