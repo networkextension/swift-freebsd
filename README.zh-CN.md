@@ -147,11 +147,13 @@ chmod +x /usr/local/bin/swiftc-arm64
 | swiftrt.o 找不到 | `no such file: .../sysroot/usr/lib/swift/freebsd/aarch64/swiftrt.o` | aarch64 运行时镜像进 sysroot |
 | 链接到宿主 x86 stdlib | `libswiftCore.so is incompatible with crt1.o` | 独立 `-resource-dir` 指向 aarch64 资源目录 |
 
-## 已编译 / 未编译
+## 已编译的库 —— 现已完整
 
-✅ **已有(23 库)**:Core、_Concurrency、Glibc、dispatch(C)、Synchronization、Distributed、Observation、RegexBuilder、_StringProcessing、_RegexParser、_Differentiation、SwiftOnoneSupport 等
+✅ **标准库与核心**:Core、_Concurrency、Glibc、dispatch(C)、Synchronization、Distributed、Observation、RegexBuilder、_StringProcessing、_RegexParser、_Differentiation、SwiftOnoneSupport 等
 
-❌ **待补**(按建议顺序):libswiftDispatch(Swift overlay)→ XCTest → FoundationEssentials → _FoundationICU/Internationalization → Foundation → FoundationXML/Networking(需要先从 `pkg.freebsd.org/FreeBSD:14:aarch64` 抽 libxml2/curl 进 sysroot)→ swift-testing
+✅ **高层库(v0.3.0 工具链里全部已在 arm64 原生编出)**:libswiftDispatch(Swift overlay)、FoundationEssentials、FoundationInternationalization、_FoundationICU、Foundation、FoundationXML(libxml2)、FoundationNetworking(curl)、XCTest、swift-testing。详见 [USAGE-full-toolchain.md](USAGE-full-toolchain.md) 和 `v0.3.0-native-full` release。
+
+> 历史说明:这些在交叉编译的 v0.1.0 stdlib 里原本缺失,后于原生二阶自举([BOOTSTRAP.md](BOOTSTRAP.md))期间用板上原生编译器从源码补齐(原生构建无需 sysroot —— libxml2/curl/icu 直接用 `pkg` 装的)。
 
 ## Release 资产
 

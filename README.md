@@ -163,16 +163,22 @@ chmod +x /usr/local/bin/swiftc-arm64
 | swiftrt.o not found | `no such file: .../sysroot/usr/lib/swift/freebsd/aarch64/swiftrt.o` | Mirror the aarch64 runtime into the sysroot |
 | Linking against host x86 stdlib | `libswiftCore.so is incompatible with crt1.o` | Separate `-resource-dir` pointing at the aarch64 resources |
 
-## Built / Not Yet Built
+## Built libraries — now complete
 
-✅ **Available (23 libraries)**: Core, _Concurrency, Glibc, dispatch (C), Synchronization,
+✅ **Standard library & core**: Core, _Concurrency, Glibc, dispatch (C), Synchronization,
 Distributed, Observation, RegexBuilder, _StringProcessing, _RegexParser, _Differentiation,
 SwiftOnoneSupport, and more.
 
-❌ **Still missing** (suggested order): libswiftDispatch (Swift overlay) → XCTest →
-FoundationEssentials → _FoundationICU/Internationalization → Foundation →
-FoundationXML/Networking (requires pulling aarch64 libxml2/curl from
-`pkg.freebsd.org/FreeBSD:14:aarch64` into the sysroot first) → swift-testing.
+✅ **Higher-level libraries (all built natively on arm64 in the v0.3.0 toolchain)**:
+libswiftDispatch (Swift overlay), FoundationEssentials, FoundationInternationalization,
+_FoundationICU, Foundation, FoundationXML (libxml2), FoundationNetworking (curl), XCTest,
+swift-testing. See [USAGE-full-toolchain.md](USAGE-full-toolchain.md) and the
+`v0.3.0-native-full` release.
+
+> Historical note: these were originally missing in the cross-compiled v0.1.0 stdlib. They
+> were completed during the native stage-2 bootstrap ([BOOTSTRAP.md](BOOTSTRAP.md)) by
+> building them from source with the native compiler on the board (no sysroot needed —
+> native libxml2/curl/icu from `pkg`).
 
 ## Release Assets
 
