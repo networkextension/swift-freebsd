@@ -22,10 +22,20 @@ the bulk of the FreeBSD porting work and **carry forward** to 6.x (with rebasing
 
 This draft adds:
 
-- **Makefile delta** ([Makefile](lang/swift/Makefile)): DISTVERSION → 6.x, and `GH_TUPLE`
-  gains the components 6.x introduced — `swift-build` (SwiftBuild), `swift-testing`,
-  `swift-foundation`, `swift-foundation-icu`, `swift-toolchain-sqlite`. (Foundation is now
-  split into `swift-foundation` + `swift-corelibs-foundation`.)
+- **Makefile delta** ([Makefile](lang/swift/Makefile)): DISTVERSION → **6.3.2**, and
+  `GH_TUPLE` gains the components 6.x introduced — `swift-build` (SwiftBuild),
+  `swift-testing`, `swift-foundation`, `swift-foundation-icu`, `swift-toolchain-sqlite`.
+  (Foundation is now split into `swift-foundation` + `swift-corelibs-foundation`.)
+  Most repos use the coherent `swift-6.3.2-RELEASE` tag; the exceptions are pinned to the
+  exact refs from swift-6.3.2's `utils/update_checkout/update-checkout-config.json`
+  (`release/6.3` scheme):
+  - `swift-toolchain-sqlite` → **1.0.7** (its own semver tags, no `swift-X.Y.Z-RELEASE`).
+  - apple/*: argument-parser **1.6.1**, asn1 **1.3.2**, certificates **1.10.1**, collections
+    **1.1.6**, crypto **3.12.5**, nio **2.65.0**, system **1.5.0**.
+  - `Yams` is no longer listed in the 6.3 scheme (swift-format dropped it) — kept pending
+    verification, remove if unused.
+- **`files/start-build.sh`** ([start-build.sh](lang/swift/files/start-build.sh)): adapted
+  verbatim from swift510, adding only `--swift-testing true`.
 - **A small set of 6.x-relevant patches** in `files/`.
 
 ## Important: cross-compile fixes vs. native-port fixes
@@ -45,20 +55,18 @@ The fixes that ARE relevant to a native 6.x build are included here:
   dir before the generic one so `-lswiftCore` resolves the right arch. Low-risk, may also
   help other platforms.
 
-### Build/install-step fix (not a source patch)
+### Resource-dir / `LIBRARY_PATH` workarounds — NOT needed in the port
 
-`import Foundation` / `import Dispatch` need their **clang underlying modules** laid out in
-the toolchain's resource dir. In a from-scratch native build the install step handles this;
-when assembling a usable toolchain we had to place, under `lib/swift/`:
+When we hand-assembled an *uninstalled* toolchain, `import Foundation` / `import Dispatch`
+failed until we manually placed their **clang underlying modules** in the resource dir
+(`dispatch/` + a sibling `os/` + `Block/`; the Foundation client modules `_FoundationCShims`,
+`CoreFoundation`, `_foundation_unicode`) and set `LIBRARY_PATH=<resource-dir>/<platform>/<arch>`.
 
-- `dispatch/` (the libdispatch public headers + `module.modulemap`) and a **sibling**
-  `os/` directory (the headers use `#include <os/...>`), plus `Block/`.
-- the Foundation client clang modules `_FoundationCShims`, `CoreFoundation`,
-  `_foundation_unicode`.
-
-And set `LIBRARY_PATH=<resource-dir>/<platform>/<arch>` so the linker finds
-`libFoundation.so` / `libswiftDispatch.so`. These belong in `files/start-build.sh` /
-the install stage rather than as source patches.
+**The port does not need any of that.** `files/start-build.sh` runs `build-script ...
+--install-all true`, the same proper install path `lang/swift510` uses on amd64. The install
+step lays out the clang modules and shared libs in the correct resource-dir locations
+itself, so there are **no** ad-hoc `LIBRARY_PATH` / module-copy steps in this port — those
+were artifacts of the hand-assembled toolchain only.
 
 ## Provenance / validation
 
@@ -70,7 +78,8 @@ the install stage rather than as source patches.
 
 ## Next steps
 
-1. Rebase the `lang/swift510` patch set onto the 6.x release tag.
-2. Wire the resource-dir / `LIBRARY_PATH` fixes into `files/start-build.sh`.
-3. Build on a FreeBSD aarch64 host (poudriere), iterate on new 6.x patches.
+1. Rebase the `lang/swift510` patch set (~80 FreeBSD patches) onto `swift-6.3.2-RELEASE`.
+2. Build on a FreeBSD aarch64 host with poudriere (see [POUDRIERE.md](POUDRIERE.md)),
+   iterate on whatever new 6.x patches surface; regenerate `distinfo` and `pkg-plist`.
+3. Verify the Yams dependency: drop it from `GH_TUPLE` if the 6.3.2 build never fetches it.
 4. Coordinate with the `lang/swift510` maintainer (jgopensource@proton.me) and Xin LI.

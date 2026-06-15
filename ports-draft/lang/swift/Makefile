@@ -12,7 +12,7 @@
 #     live in lang/swift510 and carry forward)
 
 PORTNAME=	swift
-DISTVERSION=	6.3.0
+DISTVERSION=	6.3.2
 PORTREVISION=	0
 CATEGORIES=	lang
 DIST_SUBDIR=	${PORTNAME}
@@ -35,9 +35,11 @@ LIB_DEPENDS=	libcurl.so:ftp/curl \
 USES=		libedit ninja:build perl5 pkgconfig python:3.9+ \
 		shebangfix sqlite:3
 USE_GITHUB=	nodefault
-# The common tag which applies to most repos. For a real submission this should be
-# a -RELEASE tag; this work was validated against swift-DEVELOPMENT-SNAPSHOT-2026-02-02-a
-# (compiler at 3f8c798cfe / LLVM 972b6285835).
+# The common tag which applies to most swiftlang repos. swift-6.3.2-RELEASE was confirmed
+# to exist across swift, swift-build, swift-foundation, swift-foundation-icu, swift-testing,
+# swift-corelibs-foundation, swift-syntax, swift-package-manager, etc. (The aarch64 work was
+# first validated against swift-DEVELOPMENT-SNAPSHOT-2026-02-02-a / compiler 3f8c798cfe /
+# LLVM 972b6285835; the port targets the coherent -RELEASE tag instead.)
 tag=		swift-${DISTVERSION}-RELEASE
 
 # Compiler + core. NOTE vs swift510: foundation split into swift-foundation +
@@ -65,16 +67,23 @@ GH_TUPLE=\
 	swiftlang:swift-package-manager:${tag}:swiftpm/swiftpm \
 	swiftlang:swift-syntax:${tag}:swift_syntax/swift-syntax \
 	swiftlang:swift-testing:${tag}:swift_testing/swift-testing \
-	swiftlang:swift-toolchain-sqlite:${tag}:swift_toolchain_sqlite/swift-toolchain-sqlite \
 	swiftlang:swift-tools-support-core:${tag}:swift_tools_support_core/swift-tools-support-core
+# swift-toolchain-sqlite uses its own semver tags (NOT swift-X.Y.Z-RELEASE). swift-6.3.2's
+# utils/update_checkout/update-checkout-config.json (release/6.3 scheme) pins 1.0.7.
 GH_TUPLE+=\
-	apple:swift-argument-parser:1.5.0:swift_argument_parser/swift-argument-parser \
-	apple:swift-asn1:1.3.0:swift_asn1/swift-asn1 \
-	apple:swift-certificates:1.5.0:swift_certificates/swift-certificates \
-	apple:swift-collections:1.1.4:swift_collections/swift-collections \
-	apple:swift-crypto:3.8.0:swift_crypto/swift-crypto \
-	apple:swift-nio:2.76.0:swift_nio/swift-nio \
-	apple:swift-system:1.4.0:swift_system/swift-system
+	swiftlang:swift-toolchain-sqlite:1.0.7:swift_toolchain_sqlite/swift-toolchain-sqlite
+# apple/* pins from swift-6.3.2's update-checkout-config.json (release/6.3 scheme).
+GH_TUPLE+=\
+	apple:swift-argument-parser:1.6.1:swift_argument_parser/swift-argument-parser \
+	apple:swift-asn1:1.3.2:swift_asn1/swift-asn1 \
+	apple:swift-certificates:1.10.1:swift_certificates/swift-certificates \
+	apple:swift-collections:1.1.6:swift_collections/swift-collections \
+	apple:swift-crypto:3.12.5:swift_crypto/swift-crypto \
+	apple:swift-nio:2.65.0:swift_nio/swift-nio \
+	apple:swift-system:1.5.0:swift_system/swift-system
+# NOTE: swift-6.3's update-checkout-config.json no longer lists Yams (swift-format dropped
+# the dependency). Kept here pending verification against swift-format's 6.3.2 manifest;
+# remove if the build does not fetch it.
 GH_TUPLE+=jpsim:Yams:5.1.3:yams/yams
 USE_PERL5=	build
 
