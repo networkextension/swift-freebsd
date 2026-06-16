@@ -1,14 +1,20 @@
-# Driven by the port's do-build target. Adapted from lang/swift510's files/start-build.sh.
+# Driven by the port's do-build target.
 #
-# Delta from swift510 (Swift 5.10.1) for the 6.3.2 port:
-#   * --swift-testing true        (swift-testing is a first-class component in 6.x)
-# Everything else is identical to swift510, including the multi-stage bootstrap:
-#   --bootstrapping bootstrapping builds a stage-0 C++-only compiler with the system
-#   clang, then uses it to compile SwiftCompilerSources -- so NO pre-existing Swift
-#   toolchain is required (this is the chicken-and-egg solution).
+# IMPORTANT (verified building 6.3.2 on FreeBSD aarch64, 2026-06): unlike swift510 (5.10),
+# Swift 6.3 CANNOT self-bootstrap on FreeBSD. Its stdlib uses macros, which force
+# SWIFT_BUILD_SWIFT_SYNTAX=ON, which CMake hard-restricts to --bootstrapping=hosttools on
+# FreeBSD/Linux (swift/CMakeLists.txt ~L1041). hosttools needs a PREBUILT, VERSION-MATCHED
+# host Swift toolchain (the host compiler builds the stdlib and stamps it with the host's
+# version; a mismatched host => "module compiled with Swift 6.3 cannot be imported by the
+# Swift 6.3.2 compiler"). So the port must provide a 6.3.x bootstrap toolchain.
+# See ../../BUILD-NOTES-6.3.md.
+#
+# SWIFT_BOOTSTRAP_TOOLCHAIN must point at the extracted bootstrap toolchain's <prefix>/usr
+# (the dir containing bin/swiftc + lib/swift). In a real port this comes from a
+# BUILD_DEPENDS / distfile (like lang/rust's stage0), not from system clang.
 #
 # Args (passed by the Makefile do-build):
-#   $1 swift_project_dir   (WRKSRC, i.e. .../swift-project)
+#   $1 swift_project_dir   (WRKSRC)
 #   $2 swift_install_destdir (EarlyStageDir DESTDIR)
 #   $3 swift_install_prefix  (${PREFIX}/swift)
 #   $4 clang_module_cache_path
@@ -18,9 +24,14 @@ swift_install_destdir=$2
 swift_install_prefix=$3
 clang_module_cache_path=$4
 
-# For tools like 'ld', 'ar', 'ranlib', etc. prefer the versions from the base system
-export PATH="/sbin:/bin:/usr/sbin:/usr/bin:${PATH}"
+: "${SWIFT_BOOTSTRAP_TOOLCHAIN:?set SWIFT_BOOTSTRAP_TOOLCHAIN to the bootstrap toolchain's <prefix>/usr}"
+TC="${SWIFT_BOOTSTRAP_TOOLCHAIN}"
 
+# base-system ld/ar/ranlib first; then the bootstrap toolchain's swiftc on PATH
+export PATH="$TC/bin:/sbin:/bin:/usr/sbin:/usr/bin:${PATH}"
+# the bootstrap swiftc is Swift-in-Swift; it needs its own runtime to run
+export LD_LIBRARY_PATH="$TC/lib/swift/freebsd/aarch64:$TC/lib/swift/host/compiler:$TC/lib/swift/host"
+export SWIFTC="$TC/bin/swiftc"
 export CLANG_MODULE_CACHE_PATH=${clang_module_cache_path}
 
 if [ ${CCACHE_ENABLED} = yes ] ; then
@@ -36,16 +47,16 @@ else
 fi
 
 cd ${swift_project_dir}/swift &&
-utils/build-script --bootstrapping bootstrapping \
+utils/build-script \
 --release \
 --assertions \
+--bootstrapping=hosttools \
 --host-cc /usr/bin/clang \
 --host-cxx /usr/bin/clang++ \
 ${ccache_fragment} \
 ${jobs_fragment} \
 --llvm-targets-to-build 'AArch64;X86' \
 --skip-early-swift-driver \
---skip-early-swiftsyntax \
 --libdispatch true \
 --foundation true \
 --xctest true \
@@ -56,6 +67,11 @@ ${jobs_fragment} \
 --swift-testing true \
 --extra-cmake-options="-DSWIFT_USE_LINKER=lld" \
 --extra-cmake-options="-DLLVM_USE_LINKER=lld" \
+--extra-cmake-options="-DSWIFT_BUILD_SWIFT_SYNTAX=ON" \
+--extra-cmake-options="-DCMAKE_Swift_COMPILER=$TC/bin/swiftc" \
+`# serialize links: small-board RAM/swap wedges on parallel links (see BUILD-NOTES-6.3.md)` \
+--extra-cmake-options="-DLLVM_PARALLEL_LINK_JOBS=1" \
+--extra-cmake-options="-DSWIFT_PARALLEL_LINK_JOBS=1" \
 --llvm-max-parallel-lto-link-jobs 1 \
 --swift-tools-max-parallel-lto-link-jobs 1 \
 --install-destdir ${swift_install_destdir} \

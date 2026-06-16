@@ -4,15 +4,44 @@ A starting point for a `lang/swift` (6.x) port that builds on **FreeBSD aarch64*
 amd64), derived from the existing **`lang/swift510`** port. Intended for discussion with
 the `lang/swift510` maintainer and FreeBSD ports reviewers — **not a finished port**.
 
-## The bootstrap "chicken-and-egg" — already solved
+## The bootstrap "chicken-and-egg" — 6.3 REQUIRES a prebuilt host toolchain
 
-Building Swift needs a Swift compiler (the compiler contains Swift code,
-`SwiftCompilerSources`). The port does **not** need a pre-existing Swift toolchain:
-`build-script`'s **multi-stage bootstrapping** first builds a stage-0 C++-only compiler
-(with the system clang), then uses that to compile `SwiftCompilerSources` into the final
-compiler. This is exactly how `lang/swift510` builds on amd64 today; this port extends it
-to aarch64. (Optionally, a prebuilt bootstrap toolchain could be shipped as a distfile —
-like `lang/rust` does — to speed builds, but it is not required.)
+> **CORRECTION (verified building 6.3.2 on FreeBSD aarch64, 2026-06).** The earlier
+> assumption — that `build-script`'s multi-stage `--bootstrapping bootstrapping` lets the
+> port self-bootstrap from just system clang, as `lang/swift510` does — **does not hold for
+> Swift 6.3.** It worked for 5.10 only because 5.10's standard library had no macros.
+
+Swift 6.3's standard library uses **Swift macros** (`stdlib/public/core/SwiftMacros`), which
+require `swift-syntax` / Swift-parser integration (`SWIFT_BUILD_SWIFT_SYNTAX=ON`). And
+`swift/CMakeLists.txt` (≈line 1041) hard-enforces:
+
+```cmake
+# Only "HOSTTOOLS" is supported in Linux when Swift parser integration is enabled.
+if(SWIFT_HOST_VARIANT_SDK MATCHES "LINUX|OPENBSD|FREEBSD" AND NOT BOOTSTRAPPING_MODE STREQUAL "HOSTTOOLS")
+  message(WARNING "Force setting BOOTSTRAPPING=HOSTTOOLS ...")
+  ... message(SEND_ERROR "No Swift compiler found ...")
+```
+
+So on FreeBSD/Linux, a macro-using (6.3) stdlib can **only** be built with
+`--bootstrapping=hosttools` + a **prebuilt host Swift compiler**. Pure
+`--bootstrapping bootstrapping` (no host Swift) errors with `SwiftMacros ... missing and no
+known rule to make it` (syntax off) or `No Swift compiler found` (syntax on).
+
+**Worse — the host must be VERSION-MATCHED.** In hosttools mode the host compiler builds the
+target stdlib, so the stdlib gets stamped with the *host's* version. If you host-build
+6.3.2 with, say, a 6.3-dev host, you get a **6.3.2 compiler + a 6.3-stamped stdlib**, and the
+6.3.2 compiler then rejects its own stdlib:
+`error: module compiled with Swift 6.3 cannot be imported by the Swift 6.3.2 compiler`.
+Official Linux toolchains avoid this by downloading a host snapshot of the *same* version.
+
+**Consequence for this port:** like `lang/rust` ships a stage0, **`lang/swift` 6.3 must
+ship/depend on a version-matched 6.3.x bootstrap toolchain distfile** (`BUILD_DEPENDS` on a
+`swift-bootstrap` distfile, or `USES=...`). It cannot self-bootstrap from system clang alone.
+
+Creating that *first* matched bootstrap toolchain is a one-time effort, documented in
+[BUILD-NOTES-6.3.md](BUILD-NOTES-6.3.md) (the "regen-from-`.swiftinterface`" trick turns a
+near-version host build into a version-consistent one). Once one exists, subsequent port
+builds use it as the hosttools seed.
 
 ## What carries over from lang/swift510 vs. what's new
 
@@ -34,9 +63,14 @@ This draft adds:
     **1.1.6**, crypto **3.12.5**, nio **2.65.0**, system **1.5.0**.
   - `Yams` is no longer listed in the 6.3 scheme (swift-format dropped it) — kept pending
     verification, remove if unused.
-- **`files/start-build.sh`** ([start-build.sh](lang/swift/files/start-build.sh)): adapted
-  verbatim from swift510, adding only `--swift-testing true`.
+- **`files/start-build.sh`** ([start-build.sh](lang/swift/files/start-build.sh)): rewritten
+  for `--bootstrapping=hosttools` seeded by a version-matched bootstrap toolchain
+  (`SWIFT_BOOTSTRAP_TOOLCHAIN`) — **not** the swift510 `--bootstrapping bootstrapping`, which
+  6.3 cannot use on FreeBSD (see above). Also serializes links for small-board stability.
 - **A small set of 6.x-relevant patches** in `files/`.
+- **[BUILD-NOTES-6.3.md](BUILD-NOTES-6.3.md)**: the full from-scratch build write-up
+  (coherent checkout, hosttools/version-matched-host wall, the regen-from-`.swiftinterface`
+  bootstrap trick, memory/thermal knobs).
 
 ## Important: cross-compile fixes vs. native-port fixes
 

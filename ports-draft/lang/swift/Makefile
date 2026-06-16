@@ -119,10 +119,19 @@ post-patch:
 	@${SED} -E -e 's@^python3=python3$$@python3=${PYTHON_CMD}@' -i .bak ${WRKSRC}/swift/utils/build-script-impl
 
 # The build is delegated to files/start-build.sh, which drives swift/utils/build-script.
-# Bootstrap (the chicken-and-egg): build-script's multi-stage bootstrapping builds a
-# stage-0 C++-only compiler first, then uses it to compile SwiftCompilerSources — so NO
-# pre-existing Swift toolchain is required. This is the same mechanism lang/swift510 uses
-# on amd64; this port extends it to aarch64.
+#
+# CORRECTION vs swift510: Swift 6.3 CANNOT self-bootstrap on FreeBSD (its stdlib uses macros,
+# which force --bootstrapping=hosttools, which needs a prebuilt VERSION-MATCHED host Swift
+# toolchain). See ../../BUILD-NOTES-6.3.md and the README. So the real port needs a bootstrap
+# toolchain, e.g.:
+#
+#   BUILD_DEPENDS+= ${LOCALBASE}/swift-bootstrap/usr/bin/swiftc:lang/swift-bootstrap
+#   SWIFT_BOOTSTRAP_TOOLCHAIN?= ${LOCALBASE}/swift-bootstrap/usr
+#
+# (a `swift-bootstrap` distfile of a matched 6.3.x toolchain, like lang/rust ships a stage0).
+# For now SWIFT_BOOTSTRAP_TOOLCHAIN is left for the builder to point at a matched toolchain.
+SWIFT_BOOTSTRAP_TOOLCHAIN?=	${LOCALBASE}/swift-bootstrap/usr
+
 do-build:
 	@${MKDIR} ${early_stage_dir}
 	${SETENV} \
@@ -130,6 +139,7 @@ do-build:
 		CCACHE_BIN=${CCACHE_BIN} \
 		CCACHE_DIR=${CCACHE_DIR} \
 		MAKE_JOBS_NUMBER=${MAKE_JOBS_NUMBER} \
+		SWIFT_BOOTSTRAP_TOOLCHAIN=${SWIFT_BOOTSTRAP_TOOLCHAIN} \
 		${SH} -x ${FILESDIR}/start-build.sh ${WRKSRC} ${early_stage_dir} \
 			${swift_install_prefix} ${WRKDIR}/clang-module-cache
 
