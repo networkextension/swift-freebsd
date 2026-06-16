@@ -56,11 +56,39 @@ done
   different toolchain's `host/compiler` `.so` (6.3) **segfaults** the 6.3.2 frontend.
 - After regenerating the stdlib modules, `hello.swift` compiles and runs as 6.3.2. ✓
 - **Caveats:** non-resilient overlays have **no** `.swiftinterface` (e.g. `Dispatch`) → can't
-  be regen'd, must be rebuilt by the 6.3.2 compiler. `CxxStdlib` needs C++-interop flags.
-- **Proper finish:** regen *everything incl. the host `swift-syntax`/`SwiftCompilerSources`
-  modules* to assemble a fully-consistent 6.3.2 host, then re-run `build-script` once with it
-  as the hosttools seed → all of stdlib/Dispatch/Foundation/SwiftPM build natively as 6.3.2.
-  That consistent toolchain *is* the bootstrap distfile the port should ship.
+  be regen'd, must be rebuilt by the 6.3.2 compiler. `CxxStdlib` regen needs
+  `-cxx-interoperability-mode=default`. Host swift-syntax modules (`lib/swift/host/*`) need
+  `-I lib/swift/host` so they resolve each other; move all binaries aside first so a module's
+  deps fall back to interfaces (handles the import cascade).
+
+### ⛔ The hard limit — regen is NOT enough to *rebuild the compiler*
+
+A toolchain assembled purely by regen (6.3.2 compiler binary + all `.swiftmodule` re-stamped
+6.3.2 — stdlib, Dispatch, CxxStdlib, host swift-syntax) **compiles and runs normal Swift fine**
+(verified: `import Dispatch`, `import SwiftSyntax`, `import CxxStdlib`, stdlib all work as 6.3.2).
+**But it CANNOT serve as the hosttools seed for a full `build-script` rebuild.** Re-running
+build-script with it as host gets through the C++ compiler libs and ~21% in **crashes** building
+ASTGen's `swiftMacroEvaluation`:
+
+```
+Assertion failed: (isHandleInSync() && "invalid iterator access!") ... DenseMap.h:1311
+  While evaluating request UnqualifiedLookupRequest(looking up 'BridgedASTContext' ...)
+swift-frontend: signal 6 (Abort trap)
+```
+
+Root cause: regen only fixes the **`.swiftmodule` descriptors**; the host swift-syntax **`.so`
+are still 6.3-dev machine code**. ASTGen / SwiftCompilerSources *call into* swift-syntax **at
+compile time** (in-process plugin server, `BridgedASTContext` bridging), so the ABI/version skew
+corrupts the compiler's name-lookup → assertion/crash. To truly fix it the host swift-syntax must
+be **recompiled** (`.so`) by a 6.3.2 compiler — which needs a 6.3.2 host — **the irreducible
+bootstrap chicken-and-egg.**
+
+**Bottom line:** the first version-matched FreeBSD bootstrap toolchain cannot be conjured by regen
+surgery alone. It needs either (a) a matched-version host snapshot from elsewhere — none exists
+for FreeBSD, which is exactly what the official "Swift on FreeBSD" effort / @etcwilde would
+provide — or (b) a host where swift-syntax was *compiled* (not regen'd) at the target version.
+Regen is still useful: it yields a 6.3.2 compiler+stdlib that **compiles user Swift**, and cleanly
+fixes resilient-module version stamps; it just can't self-host the *compiler* rebuild.
 
 ## 3. build-script recipe that got furthest (hosttools)
 
@@ -108,8 +136,18 @@ utils/build-script --release --assertions --bootstrapping=hosttools \
 
 ## 5. Status
 
-Reached a **consistent 6.3.2 compiler + stdlib** on FreeBSD aarch64 (`hello.swift` compiles &
-runs) via the regen trick. LLVM/cmark/swift/libdispatch/Foundation all build. Remaining for a
-*complete* clean toolchain: the §2 "proper finish" two-pass (assemble a fully-consistent 6.3.2
-host, re-run build-script) — which simultaneously produces the bootstrap distfile the port
-needs. Best run on the Ampere host under poudriere.
+**Achieved:** a 6.3.2 compiler + regenerated 6.3.2 stdlib + Dispatch + CxxStdlib + host
+swift-syntax modules on FreeBSD aarch64 — **compiles and runs user Swift** (verified with
+Swift+Dispatch+SwiftSyntax+CxxStdlib programs). LLVM/cmark build patch-free. Snapshotted as a
+~950 MB candidate bootstrap toolchain.
+
+**Blocked (and now understood):** a *complete self-rebuilt* toolchain (re-running build-script
+to natively rebuild stdlib/Dispatch/Foundation/SwiftPM and produce a clean distfile) is **not
+reachable on this hardware by regen alone** — see §2's "hard limit": the regen-assembled host
+crashes building ASTGen because the host swift-syntax `.so` are 6.3-dev ABI. Closing that needs
+swift-syntax *recompiled* at 6.3.2, i.e. a genuinely matched host (the bootstrap chicken-and-egg).
+
+**Recommended next step:** coordinate with the official "Swift on FreeBSD" effort (@etcwilde,
+swiftlang/swift#89943) for a matched-version host snapshot, or rebuild swift-syntax from source
+with the regen toolchain (uncertain; ASTGen is where it breaks) — best attempted on a
+well-resourced host (Ampere) under poudriere, not the thermal/swap/network-constrained dev board.
