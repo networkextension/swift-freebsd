@@ -1,0 +1,17 @@
+[
+{ type: install
+  message: <<EOM
+Swift 6.3.2 is installed under %%PREFIX%%/swift632.
+
+Add it to your PATH, e.g.:
+
+    setenv PATH %%PREFIX%%/swift632/bin:$PATH      # csh/tcsh
+    export PATH=%%PREFIX%%/swift632/bin:$PATH      # sh/bash
+
+Then:
+
+    swiftc --version
+    swift package init --type executable && swift build && swift run
+EOM
+}
+]

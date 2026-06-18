@@ -1,0 +1,11 @@
+Swift is a general-purpose, multi-paradigm, compiled programming language with a
+focus on safety, performance, and expressive syntax. This port builds the
+Swift 6.3.2-RELEASE toolchain: the compiler and standard library, Foundation,
+Dispatch, XCTest, swift-testing, and the Swift Package Manager (swift build /
+swift package / swift run / swift test).
+
+This versioned port (lang/swift632) installs under ${PREFIX}/swift632 so it can
+coexist with other lang/swiftNNN versions; add ${PREFIX}/swift632/bin to PATH.
+
+aarch64 support was brought up and verified end-to-end on FreeBSD 15.1; see
+https://github.com/networkextension/swift-freebsd and swiftlang/swift#89943.
