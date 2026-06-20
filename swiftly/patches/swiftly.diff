@@ -1,0 +1,188 @@
+diff --git a/Package.swift b/Package.swift
+index 4527fc1..da54c47 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -43,6 +43,7 @@ let package = Package(
+                 .target(name: "SwiftlyCore"),
+                 .target(name: "LinuxPlatform", condition: .when(platforms: [.linux])),
+                 .target(name: "MacOSPlatform", condition: .when(platforms: [.macOS])),
++                .target(name: "FreeBSDPlatform"),
+                 .product(name: "SwiftToolsSupport-auto", package: "swift-tools-support-core"),
+                 .product(name: "SystemPackage", package: "swift-system"),
+             ],
+@@ -55,6 +56,7 @@ let package = Package(
+                 .target(name: "SwiftlyCore"),
+                 .target(name: "LinuxPlatform", condition: .when(platforms: [.linux])),
+                 .target(name: "MacOSPlatform", condition: .when(platforms: [.macOS])),
++                .target(name: "FreeBSDPlatform"),
+             ],
+             swiftSettings: swiftSettings
+         ),
+@@ -138,6 +140,7 @@ let package = Package(
+                 .target(name: "SwiftlyCore"),
+                 .target(name: "LinuxPlatform", condition: .when(platforms: [.linux])),
+                 .target(name: "MacOSPlatform", condition: .when(platforms: [.macOS])),
++                .target(name: "FreeBSDPlatform"),
+                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                 .product(name: "_NIOFileSystem", package: "swift-nio"),
+             ],
+@@ -164,6 +167,18 @@ let package = Package(
+             ],
+             swiftSettings: swiftSettings
+         ),
++        .target(
++            name: "FreeBSDPlatform",
++            dependencies: [
++                "SwiftlyCore",
++                "CLibArchive",
++                .product(name: "SystemPackage", package: "swift-system"),
++            ],
++            swiftSettings: swiftSettings,
++            linkerSettings: [
++                .linkedLibrary("z"),
++            ]
++        ),
+         .systemLibrary(
+             name: "CLibArchive",
+             pkgConfig: "libarchive",
+diff --git a/Sources/Swiftly/Swiftly.swift b/Sources/Swiftly/Swiftly.swift
+index 2b73bee..0fd1152 100644
+--- a/Sources/Swiftly/Swiftly.swift
++++ b/Sources/Swiftly/Swiftly.swift
+@@ -4,6 +4,8 @@ import Foundation
+ import LinuxPlatform
+ #elseif os(macOS)
+ import MacOSPlatform
++#elseif os(FreeBSD)
++import FreeBSDPlatform
+ #endif
+ import SwiftlyCore
+ import SystemPackage
+@@ -74,6 +76,8 @@ public struct Swiftly: SwiftlyCommand {
+     static let currentPlatform = Linux.currentPlatform
+ #elseif os(macOS)
+     static let currentPlatform = MacOS.currentPlatform
++#elseif os(FreeBSD)
++    static let currentPlatform = FreeBSD.currentPlatform
+ #endif
+ }
+ 
+diff --git a/Sources/SwiftlyCore/Platform+Process.swift b/Sources/SwiftlyCore/Platform+Process.swift
+index b958c2c..675427e 100644
+--- a/Sources/SwiftlyCore/Platform+Process.swift
++++ b/Sources/SwiftlyCore/Platform+Process.swift
+@@ -15,7 +15,7 @@ extension Subprocess.Executable {
+ }
+ 
+ extension Platform {
+-#if os(macOS) || os(Linux)
++#if os(macOS) || os(Linux) || os(FreeBSD)
+     public func proxyEnvironment(_ ctx: SwiftlyCoreContext, env: Environment, toolchain: ToolchainVersion) async throws -> Environment {
+         var environment = env
+ 
+diff --git a/Sources/SwiftlyCore/Platform.swift b/Sources/SwiftlyCore/Platform.swift
+index 2db95f0..c5081cf 100644
+--- a/Sources/SwiftlyCore/Platform.swift
++++ b/Sources/SwiftlyCore/Platform.swift
+@@ -171,7 +171,7 @@ extension Platform {
+         self.swiftlyHomeDir(ctx) / "config.json"
+     }
+ 
+-#if os(macOS) || os(Linux)
++#if os(macOS) || os(Linux) || os(FreeBSD)
+ 
+     // Install ourselves in the final location
+     public func installSwiftlyBin(_ ctx: SwiftlyCoreContext) async throws {
+diff --git a/Sources/SwiftlyCore/ProcessInfo.swift b/Sources/SwiftlyCore/ProcessInfo.swift
+index 137c926..6399f1a 100644
+--- a/Sources/SwiftlyCore/ProcessInfo.swift
++++ b/Sources/SwiftlyCore/ProcessInfo.swift
+@@ -22,7 +22,7 @@ public func isProcessRunning(pidString: String) throws -> Bool {
+ }
+ 
+ public func isProcessRunning(pid: Int32) throws -> Bool {
+-#if os(macOS) || os(Linux)
++#if os(macOS) || os(Linux) || os(FreeBSD)
+     let result = kill(pid, 0)
+     if result == 0 {
+         return true
+diff --git a/Sources/SwiftlyCore/Terminal.swift b/Sources/SwiftlyCore/Terminal.swift
+index 4268f19..4962087 100644
+--- a/Sources/SwiftlyCore/Terminal.swift
++++ b/Sources/SwiftlyCore/Terminal.swift
+@@ -9,7 +9,7 @@ public protocol Terminal: Sendable {
+ public struct SystemTerminal: Terminal {
+     /// Detects the terminal width in columns
+     public func width() -> Int {
+-#if os(macOS) || os(Linux)
++#if os(macOS) || os(Linux) || os(FreeBSD)
+         var size = winsize()
+ #if os(OpenBSD)
+         // TIOCGWINSZ is a complex macro, so we need the flattened value.
+diff --git a/Sources/TestSwiftly/TestSwiftly.swift b/Sources/TestSwiftly/TestSwiftly.swift
+index cd6f7ee..fca4d94 100644
+--- a/Sources/TestSwiftly/TestSwiftly.swift
++++ b/Sources/TestSwiftly/TestSwiftly.swift
+@@ -8,12 +8,16 @@ import SystemPackage
+ import LinuxPlatform
+ #elseif os(macOS)
+ import MacOSPlatform
++#elseif os(FreeBSD)
++import FreeBSDPlatform
+ #endif
+ 
+ #if os(Linux)
+ let currentPlatform: Platform = Linux.currentPlatform
+ #elseif os(macOS)
+ let currentPlatform: Platform = MacOS.currentPlatform
++#elseif os(FreeBSD)
++let currentPlatform: Platform = FreeBSD.currentPlatform
+ #else
+ #error("Unsupported platform")
+ #endif
+@@ -96,13 +100,13 @@ struct TestSwiftly: AsyncParsableCommand {
+         let swiftlyArchiveFile = FilePath(swiftlyArchive)
+ 
+         print("Extracting swiftly release")
+-#if os(Linux)
++#if os(Linux) || os(FreeBSD)
+         try await sys.tar().extract(.verbose, .compressed, .archive(swiftlyArchiveFile)).run()
+ #elseif os(macOS)
+         try await sys.installer(.verbose, .pkg(swiftlyArchiveFile), .target("CurrentUserHomeDirectory")).run()
+ #endif
+ 
+-#if os(Linux)
++#if os(Linux) || os(FreeBSD)
+         let extractedSwiftly = FilePath("./swiftly")
+ #elseif os(macOS)
+         let extractedSwiftly = FilePath((fs.home / ".swiftly/bin/swiftly").string)
+diff --git a/Tools/build-swiftly-release/BuildSwiftlyRelease.swift b/Tools/build-swiftly-release/BuildSwiftlyRelease.swift
+index 4193dd7..f0110c7 100644
+--- a/Tools/build-swiftly-release/BuildSwiftlyRelease.swift
++++ b/Tools/build-swiftly-release/BuildSwiftlyRelease.swift
+@@ -10,12 +10,16 @@ import SystemPackage
+ import MacOSPlatform
+ #elseif os(Linux)
+ import LinuxPlatform
++#elseif os(FreeBSD)
++import FreeBSDPlatform
+ #endif
+ 
+ #if os(macOS)
+ let currentPlatform = MacOS()
+ #elseif os(Linux)
+ let currentPlatform = Linux()
++#elseif os(FreeBSD)
++let currentPlatform = FreeBSD()
+ #endif
+ 
+ typealias fs = SwiftlyCore.FileSystem
+@@ -76,6 +80,8 @@ struct BuildSwiftlyRelease: AsyncParsableCommand {
+         try await self.buildLinuxRelease()
+ #elseif os(macOS)
+         try await self.buildMacOSRelease(cert: self.cert, identifier: self.identifier)
++#elseif os(FreeBSD)
++        throw Error(message: "Building swiftly releases is not yet supported on FreeBSD")
+ #else
+         #error("Unsupported OS")
+ #endif

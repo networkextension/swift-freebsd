@@ -12,6 +12,17 @@ Cross-compile Swift programs from an **x86 FreeBSD 14.x** host to **FreeBSD arm6
 > real arm64 FreeBSD board, natively compiling and running Swift. See **[BOOTSTRAP.md](BOOTSTRAP.md)**
 > and the `seed-toolchain-aarch64-freebsd.tar.gz` release asset.
 
+> **🎉 Update (2026-06-20): native 6.3.2 toolchain + swiftly.** Beyond the cross-compile
+> bring-up below, this repo now ships a **complete native `swift-6.3.2-RELEASE` toolchain**
+> for FreeBSD 15.1/aarch64 (compiler + stdlib + Foundation + Dispatch + XCTest + swift-testing
+> + SwiftPM) and the FreeBSD port to build it — and **swiftly itself now builds and runs on
+> FreeBSD**. Two legs:
+>
+> - **Toolchain** → releases ([v0.4.1](https://github.com/networkextension/swift-freebsd/releases/tag/v0.4.1)) · port: [`ports-draft/lang/swift632`](ports-draft/lang/swift632)
+> - **swiftly** (toolchain manager) → [`swiftly/`](swiftly) — `FreeBSDPlatform` + dependency patches (incl. a full SwiftNIO FreeBSD port)
+>
+> FreeBSD Swift work is tracked on the official [Swift on FreeBSD](https://github.com/orgs/swiftlang/projects/16) board.
+
 ## Validation Results (2026-06-11)
 
 Real hardware — NXP DPAA2 board, FreeBSD 14.4-RELEASE arm64:

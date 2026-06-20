@@ -1,0 +1,67 @@
+diff --git a/Package.swift b/Package.swift
+index a97eb05..c57d839 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -71,7 +71,7 @@ for target in package.targets {
+     case .regular, .test, .executable:
+         var settings = target.swiftSettings ?? []
+         // https://github.com/swiftlang/swift-evolution/blob/main/proposals/0444-member-import-visibility.md
+-        settings.append(.enableUpcomingFeature("MemberImportVisibility"))
++        // [freebsd-port] disabled: settings.append(.enableUpcomingFeature("MemberImportVisibility"))
+         target.swiftSettings = settings
+     case .macro, .plugin, .system, .binary:
+         ()  // not applicable
+diff --git a/Sources/Logging/Locks.swift b/Sources/Logging/Locks.swift
+index 1e90d8c..2b2a298 100644
+--- a/Sources/Logging/Locks.swift
++++ b/Sources/Logging/Locks.swift
+@@ -58,7 +58,7 @@ package final class Lock {
+     #if os(Windows)
+     fileprivate let mutex: UnsafeMutablePointer<SRWLOCK> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+-    #elseif os(OpenBSD)
++    #elseif os(OpenBSD) || os(FreeBSD)
+     fileprivate let mutex: UnsafeMutablePointer<pthread_mutex_t?> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+     #else
+@@ -70,7 +70,7 @@ package final class Lock {
+     package init() {
+         #if os(Windows)
+         InitializeSRWLock(self.mutex)
+-        #elseif os(OpenBSD)
++        #elseif os(OpenBSD) || os(FreeBSD)
+         var attr = pthread_mutexattr_t(bitPattern: 0)
+         let err = pthread_mutex_init(self.mutex, &attr)
+         precondition(err == 0, "\(#function) failed in pthread_mutex with error \(err)")
+@@ -176,6 +176,9 @@ internal final class ReadWriteLock: @unchecked Sendable {
+     fileprivate let rwlock: UnsafeMutablePointer<SRWLOCK> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+     fileprivate var shared: Bool = true
++    #elseif os(FreeBSD)
++    fileprivate let rwlock: UnsafeMutablePointer<pthread_rwlock_t?> =
++        UnsafeMutablePointer.allocate(capacity: 1)
+     #else
+     fileprivate let rwlock: UnsafeMutablePointer<pthread_rwlock_t> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+diff --git a/Sources/Logging/Logging.swift b/Sources/Logging/Logging.swift
+index 66569b4..345d9d7 100644
+--- a/Sources/Logging/Logging.swift
++++ b/Sources/Logging/Logging.swift
+@@ -1443,6 +1443,8 @@ internal struct StdioOutputStream: TextOutputStream, @unchecked Sendable {
+         let systemStderr = Darwin.stderr
+         #elseif os(Windows)
+         let systemStderr = CRT.stderr
++        #elseif os(FreeBSD)
++        let systemStderr = Glibc.stderr
+         #elseif canImport(Glibc)
+         let systemStderr = Glibc.stderr!
+         #elseif canImport(Android)
+@@ -1463,6 +1465,8 @@ internal struct StdioOutputStream: TextOutputStream, @unchecked Sendable {
+         let systemStdout = Darwin.stdout
+         #elseif os(Windows)
+         let systemStdout = CRT.stdout
++        #elseif os(FreeBSD)
++        let systemStdout = Glibc.stdout
+         #elseif canImport(Glibc)
+         let systemStdout = Glibc.stdout!
+         #elseif canImport(Android)

@@ -1,0 +1,37 @@
+diff --git a/Package.swift b/Package.swift
+index f0b6120..337708d 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -43,7 +43,7 @@ for target in package.targets {
+     case .regular, .test, .executable:
+         var settings = target.swiftSettings ?? []
+         // https://github.com/swiftlang/swift-evolution/blob/main/proposals/0444-member-import-visibility.md
+-        settings.append(.enableUpcomingFeature("MemberImportVisibility"))
++        // [freebsd-port] disabled: settings.append(.enableUpcomingFeature("MemberImportVisibility"))
+         target.swiftSettings = settings
+     case .macro, .plugin, .system, .binary:
+         ()  // not applicable
+diff --git a/Sources/HTTPTypes/NIOLock.swift b/Sources/HTTPTypes/NIOLock.swift
+index 1df5fd7..1b5bbb0 100644
+--- a/Sources/HTTPTypes/NIOLock.swift
++++ b/Sources/HTTPTypes/NIOLock.swift
+@@ -49,6 +49,8 @@ import wasi_pthread
+ typealias LockPrimitive = SRWLOCK
+ #elseif canImport(Darwin)
+ typealias LockPrimitive = os_unfair_lock
++#elseif os(FreeBSD)
++typealias LockPrimitive = pthread_mutex_t?
+ #else
+ typealias LockPrimitive = pthread_mutex_t
+ #endif
+@@ -63,6 +65,10 @@ extension LockOperations {
+         InitializeSRWLock(mutex)
+         #elseif canImport(Darwin)
+         mutex.initialize(to: .init())
++        #elseif os(FreeBSD)
++        var attr = pthread_mutexattr_t(bitPattern: 0)
++        let err2 = pthread_mutex_init(mutex, &attr)
++        precondition(err2 == 0, "pthread_mutex_init failed \(err2)")
+         #elseif (compiler(<6.1) && !os(WASI)) || (compiler(>=6.1) && _runtime(_multithreaded))
+         var attr = pthread_mutexattr_t()
+         pthread_mutexattr_init(&attr)
