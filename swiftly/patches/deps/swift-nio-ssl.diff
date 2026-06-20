@@ -1,0 +1,110 @@
+diff --git a/Package.swift b/Package.swift
+index 833ecea..75ef170 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -166,7 +166,7 @@ for target in package.targets {
+     case .regular, .test, .executable:
+         var settings = target.swiftSettings ?? []
+         // https://github.com/swiftlang/swift-evolution/blob/main/proposals/0444-member-import-visibility.md
+-        settings.append(.enableUpcomingFeature("MemberImportVisibility"))
++        // [freebsd-port] disabled: settings.append(.enableUpcomingFeature("MemberImportVisibility"))
+         target.swiftSettings = settings
+     case .macro, .plugin, .system, .binary:
+         ()  // not applicable
+diff --git a/Sources/CNIOBoringSSL/crypto/rand/getentropy.cc b/Sources/CNIOBoringSSL/crypto/rand/getentropy.cc
+index e6a7520..1c9172a 100644
+--- a/Sources/CNIOBoringSSL/crypto/rand/getentropy.cc
++++ b/Sources/CNIOBoringSSL/crypto/rand/getentropy.cc
+@@ -1,3 +1,7 @@
++#if defined(__FreeBSD__)
++#undef _POSIX_C_SOURCE
++#undef __STRICT_ANSI__
++#endif
+ /* Copyright 2023 The BoringSSL Authors
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+@@ -27,7 +31,7 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ 
+-#if defined(OPENSSL_MACOS) || defined(OPENSSL_FUCHSIA)
++#if defined(OPENSSL_MACOS) || defined(OPENSSL_FUCHSIA) || defined(__FreeBSD__)
+ #include <sys/random.h>
+ #endif
+ 
+diff --git a/Sources/CNIOBoringSSL/ssl/ssl_lib.cc b/Sources/CNIOBoringSSL/ssl/ssl_lib.cc
+index 68bacf4..ab2c12e 100644
+--- a/Sources/CNIOBoringSSL/ssl/ssl_lib.cc
++++ b/Sources/CNIOBoringSSL/ssl/ssl_lib.cc
+@@ -1,3 +1,11 @@
++#if defined(__FreeBSD__)
++#undef __STRICT_ANSI__
++#define _XOPEN_SOURCE 700
++#define _DEFAULT_SOURCE 1
++#endif
++#if defined(__FreeBSD__)
++#define __BSD_VISIBLE 1
++#endif
+ /*
+  * Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+  * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
+diff --git a/Sources/CNIOBoringSSLShims/include/CNIOBoringSSLShims.h b/Sources/CNIOBoringSSLShims/include/CNIOBoringSSLShims.h
+index e75ebb7..ade7cd3 100644
+--- a/Sources/CNIOBoringSSLShims/include/CNIOBoringSSLShims.h
++++ b/Sources/CNIOBoringSSLShims/include/CNIOBoringSSLShims.h
+@@ -38,6 +38,10 @@ int CNIOBoringSSLShims_SSL_CTX_set_app_data(SSL_CTX *ctx, void *data);
+ int CNIOBoringSSLShims_ERR_GET_LIB(uint32_t err);
+ int CNIOBoringSSLShims_ERR_GET_REASON(uint32_t err);
+ 
++#if defined(__FreeBSD__)
++const char *CNIOBoringSSLShims_inet_ntop(int af, const void *src, char *dst, unsigned int size);
++#endif
++
+ #if defined(__cplusplus)
+ }  // extern "C"
+ #endif
+diff --git a/Sources/CNIOBoringSSLShims/shims.c b/Sources/CNIOBoringSSLShims/shims.c
+index 1dc745b..17f7bab 100644
+--- a/Sources/CNIOBoringSSLShims/shims.c
++++ b/Sources/CNIOBoringSSLShims/shims.c
+@@ -46,3 +46,12 @@ int CNIOBoringSSLShims_ERR_GET_LIB(uint32_t err) {
+ int CNIOBoringSSLShims_ERR_GET_REASON(uint32_t err) {
+   return ERR_GET_REASON(err);
+ }
++
++#if defined(__FreeBSD__)
++#undef _POSIX_C_SOURCE
++#undef __STRICT_ANSI__
++#include <arpa/inet.h>
++const char *CNIOBoringSSLShims_inet_ntop(int af, const void *src, char *dst, unsigned int size) {
++    return inet_ntop(af, src, dst, (socklen_t)size);
++}
++#endif
+diff --git a/Sources/NIOSSL/SubjectAlternativeName.swift b/Sources/NIOSSL/SubjectAlternativeName.swift
+index 425b5bb..bcb2d61 100644
+--- a/Sources/NIOSSL/SubjectAlternativeName.swift
++++ b/Sources/NIOSSL/SubjectAlternativeName.swift
+@@ -208,7 +208,11 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
+         var address = address
+         var dest: [CChar] = Array(repeating: 0, count: Self.ipv4AddressLength)
+         dest.withUnsafeMutableBufferPointer { pointer in
++            #if os(FreeBSD)
++            let result = CNIOBoringSSLShims_inet_ntop(AF_INET, &address, pointer.baseAddress!, UInt32(pointer.count))
++            #else
+             let result = inet_ntop(AF_INET, &address, pointer.baseAddress!, socklen_t(pointer.count))
++            #endif
+             precondition(
+                 result != nil,
+                 "The IP address was invalid. This should never happen as we're within the IP address struct."
+@@ -221,7 +225,11 @@ extension _SubjectAlternativeName.IPAddress: CustomStringConvertible {
+         var address = address
+         var dest: [CChar] = Array(repeating: 0, count: Self.ipv6AddressLength)
+         dest.withUnsafeMutableBufferPointer { pointer in
++            #if os(FreeBSD)
++            let result = CNIOBoringSSLShims_inet_ntop(AF_INET6, &address, pointer.baseAddress!, UInt32(pointer.count))
++            #else
+             let result = inet_ntop(AF_INET6, &address, pointer.baseAddress!, socklen_t(pointer.count))
++            #endif
+             precondition(
+                 result != nil,
+                 "The IP address was invalid. This should never happen as we're within the IP address struct."

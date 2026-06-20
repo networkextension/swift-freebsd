@@ -1,0 +1,14 @@
+diff --git a/Sources/Instrumentation/Locks.swift b/Sources/Instrumentation/Locks.swift
+index 72bc54b..7f13a46 100644
+--- a/Sources/Instrumentation/Locks.swift
++++ b/Sources/Instrumentation/Locks.swift
+@@ -55,6 +55,9 @@ public final class ReadWriteLock: @unchecked Sendable {
+     fileprivate let rwlock: UnsafeMutablePointer<SRWLOCK> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+     fileprivate var shared: Bool = true
++    #elseif os(FreeBSD)
++    fileprivate let rwlock: UnsafeMutablePointer<pthread_rwlock_t?> =
++        UnsafeMutablePointer.allocate(capacity: 1)
+     #else
+     fileprivate let rwlock: UnsafeMutablePointer<pthread_rwlock_t> =
+         UnsafeMutablePointer.allocate(capacity: 1)

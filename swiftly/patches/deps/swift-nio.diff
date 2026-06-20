@@ -1,0 +1,988 @@
+diff --git a/Package.swift b/Package.swift
+index 6599dddd6..7223c8a79 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -272,6 +272,7 @@ let package = Package(
+                 "NIOPosix",
+                 "CNIOLinux",
+                 "CNIODarwin",
++                "CNIOOpenBSD",
+                 swiftAtomics,
+                 swiftCollections,
+                 swiftSystem,
+@@ -639,7 +640,7 @@ for target in package.targets {
+     case .regular, .test, .executable:
+         var settings = target.swiftSettings ?? []
+         // https://github.com/swiftlang/swift-evolution/blob/main/proposals/0444-member-import-visibility.md
+-        settings.append(.enableUpcomingFeature("MemberImportVisibility"))
++        // [freebsd-port] disabled: settings.append(.enableUpcomingFeature("MemberImportVisibility"))
+         target.swiftSettings = settings
+     case .macro, .plugin, .system, .binary:
+         ()  // not applicable
+diff --git a/Sources/CNIOOpenBSD/include/CNIOOpenBSD.h b/Sources/CNIOOpenBSD/include/CNIOOpenBSD.h
+index c2ce5da7b..ad06fe224 100644
+--- a/Sources/CNIOOpenBSD/include/CNIOOpenBSD.h
++++ b/Sources/CNIOOpenBSD/include/CNIOOpenBSD.h
+@@ -14,7 +14,7 @@
+ #ifndef C_NIO_OPENBSD_H
+ #define C_NIO_OPENBSD_H
+ 
+-#if defined(__OpenBSD__)
++#if defined(__OpenBSD__) || defined(__FreeBSD__)
+ #include <sys/types.h>
+ #include <sys/event.h>
+ #include <pthread_np.h>
+@@ -30,6 +30,7 @@
+ #include <net/if.h>
+ #include <netinet/in.h>
+ #include <netinet/ip.h>
++#include <arpa/inet.h>
+ #include <pthread.h>
+ #include <stdbool.h>
+ 
+@@ -61,6 +62,12 @@ typedef struct {
+     unsigned int ipi6_ifindex;
+ } CNIOOpenBSD_in6_pktinfo;
+ 
++typedef struct {
++    struct in_addr ipi_addr;
++    struct in_addr ipi_spec_dst;
++    int ipi_ifindex;
++} CNIOOpenBSD_in_pktinfo;
++
+ int CNIOOpenBSD_sendmmsg(int sockfd, CNIOOpenBSD_mmsghdr *msgvec, unsigned int vlen, int flags);
+ int CNIOOpenBSD_recvmmsg(int sockfd, CNIOOpenBSD_mmsghdr *msgvec, unsigned int vlen, int flags, struct timespec *timeout);
+ 
+@@ -97,5 +104,9 @@ extern const long CNIOOpenBSD_UDP_MAX_SEGMENTS;
+ // Probably unnecessary on BSD, but copying for consistency for now.
+ FTS *CNIOOpenBSD_fts_open(char * const *path_argv, int options, int (*compar)(const FTSENT **, const FTSENT **));
+ 
++
++const char *CNIOOpenBSD_inet_ntop(int af, const void *src, char *dst, socklen_t size);
++int CNIOOpenBSD_inet_pton(int af, const char *src, void *dst);
++
+ #endif
+ #endif
+diff --git a/Sources/CNIOOpenBSD/shim.c b/Sources/CNIOOpenBSD/shim.c
+index 7f51abfac..75e44d191 100644
+--- a/Sources/CNIOOpenBSD/shim.c
++++ b/Sources/CNIOOpenBSD/shim.c
+@@ -16,7 +16,7 @@
+ // (https://bugs.swift.org/browse/SR-12939).
+ void CNIOOpenBSD_i_do_nothing_just_working_around_a_darwin_toolchain_bug(void) {}
+ 
+-#if defined(__OpenBSD__)
++#if defined(__OpenBSD__) || defined(__FreeBSD__)
+ 
+ #include <CNIOOpenBSD.h>
+ #include <pthread.h>
+@@ -126,6 +126,20 @@ const long CNIOOpenBSD_UDP_MAX_SEGMENTS = UDP_MAX_SEGMENTS;
+ const long CNIOOpenBSD_UDP_MAX_SEGMENTS = -1;
+ 
+ FTS *CNIOOpenBSD_fts_open(char * const *path_argv, int options, int (*compar)(const FTSENT **, const FTSENT **)) {
++#if defined(__FreeBSD__)
++    // FreeBSD's fts_open comparator takes `const FTSENT *const *`; cast to match.
++    return fts_open(path_argv, options, (int (*)(const FTSENT * const *, const FTSENT * const *))compar);
++#else
+     return fts_open(path_argv, options, compar);
++#endif
++}
++
++#include <arpa/inet.h>
++const char *CNIOOpenBSD_inet_ntop(int af, const void *src, char *dst, socklen_t size) {
++    return inet_ntop(af, src, dst, size);
+ }
++int CNIOOpenBSD_inet_pton(int af, const char *src, void *dst) {
++    return inet_pton(af, src, dst);
++}
++
+ #endif
+diff --git a/Sources/NIOConcurrencyHelpers/NIOLock.swift b/Sources/NIOConcurrencyHelpers/NIOLock.swift
+index f57c8444b..4b068d7ba 100644
+--- a/Sources/NIOConcurrencyHelpers/NIOLock.swift
++++ b/Sources/NIOConcurrencyHelpers/NIOLock.swift
+@@ -35,7 +35,7 @@ import wasi_pthread
+ #if os(Windows)
+ @usableFromInline
+ typealias LockPrimitive = SRWLOCK
+-#elseif os(OpenBSD)
++#elseif os(OpenBSD) || os(FreeBSD)
+ @usableFromInline
+ typealias LockPrimitive = pthread_mutex_t?
+ #else
+@@ -53,7 +53,7 @@ extension LockOperations {
+ 
+         #if os(Windows)
+         InitializeSRWLock(mutex)
+-        #elseif os(OpenBSD)
++        #elseif os(OpenBSD) || os(FreeBSD)
+         var attr = pthread_mutexattr_t(bitPattern: 0)
+         pthread_mutexattr_init(&attr)
+         let err = pthread_mutex_init(mutex, &attr)
+diff --git a/Sources/NIOConcurrencyHelpers/lock.swift b/Sources/NIOConcurrencyHelpers/lock.swift
+index 4a62f7570..2dd75ff2c 100644
+--- a/Sources/NIOConcurrencyHelpers/lock.swift
++++ b/Sources/NIOConcurrencyHelpers/lock.swift
+@@ -43,7 +43,7 @@ public final class Lock {
+     #if os(Windows)
+     fileprivate let mutex: UnsafeMutablePointer<SRWLOCK> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+-    #elseif os(OpenBSD)
++    #elseif os(OpenBSD) || os(FreeBSD)
+     fileprivate let mutex: UnsafeMutablePointer<pthread_mutex_t?> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+     #else
+@@ -55,7 +55,7 @@ public final class Lock {
+     public init() {
+         #if os(Windows)
+         InitializeSRWLock(self.mutex)
+-        #elseif os(OpenBSD)
++        #elseif os(OpenBSD) || os(FreeBSD)
+         var attr = pthread_mutexattr_t(bitPattern: 0)
+         var err = pthread_mutexattr_init(&attr)
+         precondition(err == 0, "\(#function) failed in pthread_mutexattr_init with error \(err)")
+@@ -149,7 +149,7 @@ public final class ConditionLock<T: Equatable> {
+     #if os(Windows)
+     private let cond: UnsafeMutablePointer<CONDITION_VARIABLE> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+-    #elseif os(OpenBSD)
++    #elseif os(OpenBSD) || os(FreeBSD)
+     private let cond: UnsafeMutablePointer<pthread_cond_t?> =
+         UnsafeMutablePointer.allocate(capacity: 1)
+     #elseif (compiler(<6.1) && !os(WASI)) || (compiler(>=6.1) && _runtime(_multithreaded))
+diff --git a/Sources/NIOCore/BSDSocketAPI.swift b/Sources/NIOCore/BSDSocketAPI.swift
+index 590283911..7e4384da2 100644
+--- a/Sources/NIOCore/BSDSocketAPI.swift
++++ b/Sources/NIOCore/BSDSocketAPI.swift
+@@ -72,6 +72,9 @@ internal typealias socklen_t = ucrt.size_t
+ @preconcurrency import Android
+ #endif
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ 
+ #if os(Android)
+ private let sysInet_ntop:
+@@ -83,14 +86,21 @@ private let sysInet_ntop:
+         inet_ntop
+ private let sysInet_pton: @convention(c) (CInt, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> CInt = inet_pton
+ #endif
+-#elseif os(OpenBSD)
++#elseif os(OpenBSD) || os(FreeBSD)
+ @preconcurrency import Glibc
+ import CNIOOpenBSD
+ 
++#if os(FreeBSD)
++private let sysInet_ntop:
++    @convention(c) (CInt, UnsafeRawPointer?, UnsafeMutablePointer<CChar>?, socklen_t) -> UnsafePointer<CChar>? =
++        CNIOOpenBSD_inet_ntop
++private let sysInet_pton: @convention(c) (CInt, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> CInt = CNIOOpenBSD_inet_pton
++#else
+ private let sysInet_ntop:
+     @convention(c) (CInt, UnsafeRawPointer?, UnsafeMutablePointer<CChar>?, socklen_t) -> UnsafePointer<CChar>? =
+         inet_ntop
+ private let sysInet_pton: @convention(c) (CInt, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> CInt = inet_pton
++#endif
+ #elseif canImport(Darwin)
+ import Darwin
+ 
+diff --git a/Sources/NIOCore/Interfaces.swift b/Sources/NIOCore/Interfaces.swift
+index bb6c58c25..493c5cdb4 100644
+--- a/Sources/NIOCore/Interfaces.swift
++++ b/Sources/NIOCore/Interfaces.swift
+@@ -20,7 +20,10 @@
+ @preconcurrency import Bionic
+ #endif
+ import CNIOLinux
+-#elseif os(OpenBSD)
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
++#elseif os(OpenBSD) || os(FreeBSD)
+ import CNIOOpenBSD
+ #elseif canImport(Darwin)
+ import Darwin
+@@ -53,7 +56,7 @@ extension ifaddrs {
+     fileprivate var dstaddr: UnsafeMutablePointer<sockaddr>? {
+         #if os(Linux) || os(Android)
+         return self.ifa_ifu.ifu_dstaddr
+-        #elseif canImport(Darwin) || os(OpenBSD)
++        #elseif canImport(Darwin) || os(OpenBSD) || os(FreeBSD)
+         return self.ifa_dstaddr
+         #endif
+     }
+@@ -61,7 +64,7 @@ extension ifaddrs {
+     fileprivate var broadaddr: UnsafeMutablePointer<sockaddr>? {
+         #if os(Linux) || os(Android)
+         return self.ifa_ifu.ifu_broadaddr
+-        #elseif canImport(Darwin) || os(OpenBSD)
++        #elseif canImport(Darwin) || os(OpenBSD) || os(FreeBSD)
+         return self.ifa_dstaddr
+         #endif
+     }
+diff --git a/Sources/NIOCore/SocketAddresses.swift b/Sources/NIOCore/SocketAddresses.swift
+index 30bf3853e..f0cb67792 100644
+--- a/Sources/NIOCore/SocketAddresses.swift
++++ b/Sources/NIOCore/SocketAddresses.swift
+@@ -52,7 +52,10 @@ import Darwin
+ @preconcurrency import Android
+ #endif
+ import CNIOLinux
+-#elseif os(OpenBSD)
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
++#elseif os(OpenBSD) || os(FreeBSD)
+ @preconcurrency import Glibc
+ import CNIOOpenBSD
+ #elseif canImport(WASILibc)
+diff --git a/Sources/NIOCore/SocketOptionProvider.swift b/Sources/NIOCore/SocketOptionProvider.swift
+index 2b6736bdf..daf9474f6 100644
+--- a/Sources/NIOCore/SocketOptionProvider.swift
++++ b/Sources/NIOCore/SocketOptionProvider.swift
+@@ -22,7 +22,10 @@ import Darwin
+ @preconcurrency import Bionic
+ #endif
+ import CNIOLinux
+-#elseif os(OpenBSD)
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
++#elseif os(OpenBSD) || os(FreeBSD)
+ @preconcurrency import Glibc
+ import CNIOOpenBSD
+ #elseif os(Windows)
+diff --git a/Sources/NIOCore/Utilities.swift b/Sources/NIOCore/Utilities.swift
+index b9a0c788c..93fb77d4e 100644
+--- a/Sources/NIOCore/Utilities.swift
++++ b/Sources/NIOCore/Utilities.swift
+@@ -13,6 +13,9 @@
+ //===----------------------------------------------------------------------===//
+ #if os(Linux) || os(FreeBSD) || os(Android)
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ #if canImport(Glibc)
+ @preconcurrency import Glibc
+ #elseif canImport(Musl)
+@@ -20,7 +23,7 @@ import CNIOLinux
+ #elseif canImport(Android)
+ @preconcurrency import Android
+ #endif
+-#elseif os(OpenBSD)
++#elseif os(OpenBSD) || os(FreeBSD)
+ import CNIOOpenBSD
+ @preconcurrency import Glibc
+ #elseif os(Windows)
+diff --git a/Sources/NIOPosix/BSDSocketAPICommon.swift b/Sources/NIOPosix/BSDSocketAPICommon.swift
+index f0ab00c41..e505ddaba 100644
+--- a/Sources/NIOPosix/BSDSocketAPICommon.swift
++++ b/Sources/NIOPosix/BSDSocketAPICommon.swift
+@@ -97,7 +97,7 @@ extension NIOBSDSocket.SocketType {
+ }
+ 
+ // IPv4 Options
+-#if !os(OpenBSD)
++#if !os(OpenBSD) || os(FreeBSD)
+ extension NIOBSDSocket.Option {
+     /// Request that we are passed type of service details when receiving
+     /// datagrams.
+@@ -130,7 +130,7 @@ extension NIOBSDSocket.Option {
+     static let ipv6_recv_tclass: NIOBSDSocket.Option =
+         NIOBSDSocket.Option(rawValue: IPV6_RECVTCLASS)
+ 
+-    #if !os(OpenBSD)
++    #if !os(OpenBSD) || os(FreeBSD)
+     /// Request that we are passed destination address and the receiving interface index when
+     /// receiving datagrams.
+     ///
+diff --git a/Sources/NIOPosix/BSDSocketAPIPosix.swift b/Sources/NIOPosix/BSDSocketAPIPosix.swift
+index d8b5f0160..52ea21748 100644
+--- a/Sources/NIOPosix/BSDSocketAPIPosix.swift
++++ b/Sources/NIOPosix/BSDSocketAPIPosix.swift
+@@ -276,7 +276,7 @@ private let CMSG_DATA = CNIODarwin_CMSG_DATA
+ private let CMSG_DATA_MUTABLE = CNIODarwin_CMSG_DATA_MUTABLE
+ private let CMSG_SPACE = CNIODarwin_CMSG_SPACE
+ private let CMSG_LEN = CNIODarwin_CMSG_LEN
+-#elseif os(OpenBSD)
++#elseif os(OpenBSD) || os(FreeBSD)
+ import CNIOOpenBSD
+ private let CMSG_FIRSTHDR = CNIOOpenBSD_CMSG_FIRSTHDR
+ private let CMSG_NXTHDR = CNIOOpenBSD_CMSG_NXTHDR
+diff --git a/Sources/NIOPosix/ControlMessage.swift b/Sources/NIOPosix/ControlMessage.swift
+index 68c57d6d6..193e2b6eb 100644
+--- a/Sources/NIOPosix/ControlMessage.swift
++++ b/Sources/NIOPosix/ControlMessage.swift
+@@ -17,7 +17,10 @@ import NIOCore
+ import CNIODarwin
+ #elseif os(Linux) || os(FreeBSD) || os(Android)
+ import CNIOLinux
+-#elseif os(OpenBSD)
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
++#elseif os(OpenBSD) || os(FreeBSD)
+ import CNIOOpenBSD
+ import Glibc
+ #elseif os(Windows)
+@@ -240,7 +243,7 @@ struct ControlMessageParser {
+                 self.ecnValue = .init(receivedValue: readValue)
+             }
+         } else if controlMessage.type == Posix.IP_PKTINFO {
+-            #if !os(OpenBSD)
++            #if !os(OpenBSD) || os(FreeBSD)
+             if let data = controlMessage.data {
+                 let info = data.load(as: in_pktinfo.self)
+                 var addr = sockaddr_in()
+diff --git a/Sources/NIOPosix/GetaddrinfoResolver.swift b/Sources/NIOPosix/GetaddrinfoResolver.swift
+index bab810949..60ca3d62c 100644
+--- a/Sources/NIOPosix/GetaddrinfoResolver.swift
++++ b/Sources/NIOPosix/GetaddrinfoResolver.swift
+@@ -31,6 +31,9 @@ import Dispatch
+ 
+ #if os(Linux) || os(FreeBSD) || os(Android)
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ #endif
+ 
+ #if os(Windows)
+diff --git a/Sources/NIOPosix/NonBlockingFileIO.swift b/Sources/NIOPosix/NonBlockingFileIO.swift
+index 1dc23e984..362af98b9 100644
+--- a/Sources/NIOPosix/NonBlockingFileIO.swift
++++ b/Sources/NIOPosix/NonBlockingFileIO.swift
+@@ -830,7 +830,7 @@ public struct NonBlockingFileIO: Sendable {
+                         let ptr = pointer.baseAddress!.assumingMemoryBound(to: CChar.self)
+                         return String(cString: ptr)
+                     }
+-                    #if os(OpenBSD)
++                    #if os(OpenBSD) || os(FreeBSD)
+                     let ino = entry.pointee.d_fileno
+                     #else
+                     let ino = entry.pointee.d_ino
+@@ -1284,7 +1284,7 @@ extension NonBlockingFileIO {
+                         let ptr = pointer.baseAddress!.assumingMemoryBound(to: CChar.self)
+                         return String(cString: ptr)
+                     }
+-                    #if os(OpenBSD)
++                    #if os(OpenBSD) || os(FreeBSD)
+                     let ino = entry.pointee.d_fileno
+                     #else
+                     let ino = entry.pointee.d_ino
+diff --git a/Sources/NIOPosix/SelectorGeneric.swift b/Sources/NIOPosix/SelectorGeneric.swift
+index bd19a0320..9e213c8f0 100644
+--- a/Sources/NIOPosix/SelectorGeneric.swift
++++ b/Sources/NIOPosix/SelectorGeneric.swift
+@@ -185,7 +185,7 @@ internal class Selector<R: Registration> {
+     var selectorFD: CInt = -1  // -1 == we're closed
+ 
+     // Here we add the stored properties that are used by the specific backends
+-    #if canImport(Darwin) || os(OpenBSD)
++    #if canImport(Darwin) || os(OpenBSD) || os(FreeBSD)
+     @usableFromInline
+     typealias EventType = kevent
+     #elseif os(Linux) || os(Android)
+diff --git a/Sources/NIOPosix/SelectorKqueue.swift b/Sources/NIOPosix/SelectorKqueue.swift
+index d25b8e026..251c8c61c 100644
+--- a/Sources/NIOPosix/SelectorKqueue.swift
++++ b/Sources/NIOPosix/SelectorKqueue.swift
+@@ -15,7 +15,7 @@
+ import NIOConcurrencyHelpers
+ import NIOCore
+ 
+-#if canImport(Darwin) || os(OpenBSD)
++#if canImport(Darwin) || os(OpenBSD) || os(FreeBSD)
+ 
+ /// Represents the `kqueue` filters we might use:
+ ///
+@@ -82,9 +82,16 @@ extension KQueueEventFilterSet {
+             return UInt16(self.contains(event) ? EV_ADD : EV_DELETE)
+         }
+ 
+-        for (event, filter) in [
++        #if os(FreeBSD)
++        let kqueueFilters = [
++            (KQueueEventFilterSet.read, EVFILT_READ), (.write, EVFILT_WRITE),
++        ]
++        #else
++        let kqueueFilters = [
+             (KQueueEventFilterSet.read, EVFILT_READ), (.write, EVFILT_WRITE), (.except, EVFILT_EXCEPT),
+-        ] {
++        ]
++        #endif
++        for (event, filter) in kqueueFilters {
+             if let flags = calculateKQueueChange(event: event) {
+                 kevents.appendEvent(
+                     fileDescriptor: fileDescriptor,
+@@ -131,7 +138,7 @@ extension Selector: _SelectorBackendProtocol {
+             // Clamp the timespec tv_sec value to the maximum supported by the Darwin-kernel.
+             // Whilst this schedules the event far into the future (several years) it will still be triggered provided
+             // the system stays up.
+-            #if os(OpenBSD)
++            #if os(OpenBSD) || os(FreeBSD)
+             // Should double-check if this makes sense for OpenBSD, but
+             // let's just get this to compile for now.
+             ts.tv_sec = min(ts.tv_sec, time_t(sysIntervalTimerMaxSec))
+@@ -305,12 +312,18 @@ extension Selector: _SelectorBackendProtocol {
+             switch filter {
+             case EVFILT_READ:
+                 selectorEvent.formUnion(.read)
+-                fallthrough  // falling through here as `EVFILT_READ` also delivers `EV_EOF` (meaning `.readEOF`)
++                // `EVFILT_READ` also delivers `EV_EOF` (meaning `.readEOF`)
++                if Int32(ev.flags) & EV_EOF != 0 && registration.interested.contains(.readEOF) {
++                    // we only add `.readEOF` if it happened and the user asked for it
++                    selectorEvent.formUnion(.readEOF)
++                }
++                #if !os(FreeBSD)
+             case EVFILT_EXCEPT:
+                 if Int32(ev.flags) & EV_EOF != 0 && registration.interested.contains(.readEOF) {
+                     // we only add `.readEOF` if it happened and the user asked for it
+                     selectorEvent.formUnion(.readEOF)
+                 }
++                #endif
+             case EVFILT_WRITE:
+                 selectorEvent.formUnion(.write)
+             default:
+diff --git a/Sources/NIOPosix/SocketChannel.swift b/Sources/NIOPosix/SocketChannel.swift
+index 74c6af8b6..545f8c9e5 100644
+--- a/Sources/NIOPosix/SocketChannel.swift
++++ b/Sources/NIOPosix/SocketChannel.swift
+@@ -28,7 +28,7 @@ import struct WinSDK.ipv6_mreq
+ import struct WinSDK.socklen_t
+ #endif
+ 
+-#if os(OpenBSD)
++#if os(OpenBSD) || os(FreeBSD)
+ import CNIOOpenBSD
+ #endif
+ 
+@@ -125,7 +125,7 @@ final class SocketChannel: BaseStreamSocketChannel<Socket>, @unchecked Sendable
+         case _ as ChannelOptions.Types.ConnectTimeoutOption:
+             return connectTimeout as! Option.Value
+         case _ as ChannelOptions.Types.LocalVsockContextID:
+-            #if os(Windows) || os(OpenBSD)
++            #if os(Windows) || os(OpenBSD) || os(FreeBSD)
+             fallthrough
+             #else
+             return try self.socket.getLocalVsockContextID() as! Option.Value
+@@ -284,7 +284,7 @@ final class ServerSocketChannel: BaseSocketChannel<ServerSocket>, @unchecked Sen
+         case _ as ChannelOptions.Types.BacklogOption:
+             return backlog as! Option.Value
+         case _ as ChannelOptions.Types.LocalVsockContextID:
+-            #if os(Windows) || os(OpenBSD)
++            #if os(Windows) || os(OpenBSD) || os(FreeBSD)
+             fallthrough
+             #else
+             return try self.socket.getLocalVsockContextID() as! Option.Value
+@@ -323,7 +323,7 @@ final class ServerSocketChannel: BaseSocketChannel<ServerSocket>, @unchecked Sen
+             switch target {
+             case .socketAddress(let address):
+                 try socket.bind(to: address)
+-            #if os(Windows) || os(OpenBSD)
++            #if os(Windows) || os(OpenBSD) || os(FreeBSD)
+             case .vsockAddress:
+                 fatalError(vsockUnimplemented)
+             #else
+@@ -580,7 +580,7 @@ final class DatagramChannel: BaseSocketChannel<Socket>, @unchecked Sendable {
+             let valueAsInt: CInt = value as! Bool ? 1 : 0
+             switch self.localAddress?.protocol {
+             case .some(.inet):
+-                #if os(OpenBSD)
++                #if os(OpenBSD) || os(FreeBSD)
+                 throw ChannelError._operationUnsupported
+                 #else
+                 self.reportExplicitCongestionNotifications = true
+@@ -603,7 +603,7 @@ final class DatagramChannel: BaseSocketChannel<Socket>, @unchecked Sendable {
+             }
+         case _ as ChannelOptions.Types.ReceivePacketInfo:
+             let valueAsInt: CInt = value as! Bool ? 1 : 0
+-            #if os(OpenBSD)
++            #if os(OpenBSD) || os(FreeBSD)
+             throw ChannelError._operationUnsupported
+             #else
+             switch self.localAddress?.protocol {
+@@ -666,7 +666,7 @@ final class DatagramChannel: BaseSocketChannel<Socket>, @unchecked Sendable {
+         case _ as ChannelOptions.Types.ExplicitCongestionNotificationsOption:
+             switch self.localAddress?.protocol {
+             case .some(.inet):
+-                #if os(OpenBSD)
++                #if os(OpenBSD) || os(FreeBSD)
+                 throw ChannelError._operationUnsupported
+                 #else
+                 return try
+@@ -686,7 +686,7 @@ final class DatagramChannel: BaseSocketChannel<Socket>, @unchecked Sendable {
+                 throw ChannelError._operationUnsupported
+             }
+         case _ as ChannelOptions.Types.ReceivePacketInfo:
+-            #if os(OpenBSD)
++            #if os(OpenBSD) || os(FreeBSD)
+             throw ChannelError._operationUnsupported
+             #else
+             switch self.localAddress?.protocol {
+diff --git a/Sources/NIOPosix/SocketProtocols.swift b/Sources/NIOPosix/SocketProtocols.swift
+index 3996d8e57..811b6c45f 100644
+--- a/Sources/NIOPosix/SocketProtocols.swift
++++ b/Sources/NIOPosix/SocketProtocols.swift
+@@ -77,7 +77,7 @@ protocol SocketProtocol: BaseSocketProtocol {
+     func ignoreSIGPIPE() throws
+ }
+ 
+-#if os(Linux) || os(Android) || os(OpenBSD)
++#if os(Linux) || os(Android) || os(OpenBSD) || os(FreeBSD)
+ // This is a lazily initialised global variable that when read for the first time, will ignore SIGPIPE.
+ private let globallyIgnoredSIGPIPE: Bool = {
+     // no F_SETNOSIGPIPE on Linux :(
+@@ -97,7 +97,7 @@ private let globallyIgnoredSIGPIPE: Bool = {
+ extension BaseSocketProtocol {
+     // used by `BaseSocket` and `PipePair`.
+     internal static func ignoreSIGPIPE(descriptor fd: CInt) throws {
+-        #if os(Linux) || os(Android) || os(OpenBSD)
++        #if os(Linux) || os(Android) || os(OpenBSD) || os(FreeBSD)
+         let haveWeIgnoredSIGPIEThisIsHereToTriggerIgnoringIt = globallyIgnoredSIGPIPE
+         guard haveWeIgnoredSIGPIEThisIsHereToTriggerIgnoringIt else {
+             fatalError("BUG in NIO. We did not ignore SIGPIPE, this code path should definitely not be reachable.")
+diff --git a/Sources/NIOPosix/System.swift b/Sources/NIOPosix/System.swift
+index be7907dea..272695f1d 100644
+--- a/Sources/NIOPosix/System.swift
++++ b/Sources/NIOPosix/System.swift
+@@ -30,9 +30,18 @@ internal typealias MMsgHdr = CNIODarwin_mmsghdr
+ @_exported @preconcurrency import Android
+ #endif
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
++#if os(FreeBSD)
++internal typealias MMsgHdr = CNIOOpenBSD_mmsghdr
++internal typealias in6_pktinfo = CNIOOpenBSD_in6_pktinfo
++internal typealias in_pktinfo = CNIOOpenBSD_in_pktinfo
++#else
+ internal typealias MMsgHdr = CNIOLinux_mmsghdr
+ internal typealias in6_pktinfo = CNIOLinux_in6_pktinfo
+-#elseif os(OpenBSD)
++#endif
++#elseif os(OpenBSD) || os(FreeBSD)
+ @_exported @preconcurrency import Glibc
+ import CNIOOpenBSD
+ internal typealias MMsgHdr = CNIOOpenBSD_mmsghdr
+@@ -156,7 +165,7 @@ private let sysSocketpair: @convention(c) (CInt, CInt, CInt, UnsafeMutablePointe
+ private let sysSocketpair: @convention(c) (CInt, CInt, CInt, UnsafeMutablePointer<CInt>?) -> CInt = socketpair
+ #endif
+ 
+-#if os(Linux) || os(Android) || canImport(Darwin) || os(OpenBSD)
++#if os(Linux) || os(Android) || canImport(Darwin) || os(OpenBSD) || os(FreeBSD)
+ private let sysFstat = fstat
+ private let sysStat = stat
+ private let sysLstat = lstat
+@@ -173,7 +182,7 @@ private let sysRemove = remove
+ #if os(Linux) || os(Android)
+ private let sysSendMmsg = CNIOLinux_sendmmsg
+ private let sysRecvMmsg = CNIOLinux_recvmmsg
+-#elseif os(OpenBSD)
++#elseif os(OpenBSD) || os(FreeBSD)
+ private let sysKevent = kevent
+ private let sysSendMmsg = CNIOOpenBSD_sendmmsg
+ private let sysRecvMmsg = CNIOOpenBSD_recvmmsg
+@@ -356,7 +365,7 @@ internal func syscall<T>(
+         }
+     }
+ }
+-#elseif os(Linux) || os(Android) || os(OpenBSD)
++#elseif os(Linux) || os(Android) || os(OpenBSD) || os(FreeBSD)
+ @inline(__always)
+ @inlinable
+ @discardableResult
+@@ -459,7 +468,16 @@ internal enum Posix: Sendable {
+     static let SHUT_WR: CInt = CInt(Darwin.SHUT_WR)
+     @usableFromInline
+     static let SHUT_RDWR: CInt = CInt(Darwin.SHUT_RDWR)
+-    #elseif os(Linux) || os(FreeBSD) || os(Android) || os(OpenBSD)
++    #elseif os(FreeBSD)
++    @usableFromInline
++    static let UIO_MAXIOV: Int = 1024
++    @usableFromInline
++    static let SHUT_RD: CInt = 0
++    @usableFromInline
++    static let SHUT_WR: CInt = 1
++    @usableFromInline
++    static let SHUT_RDWR: CInt = 2
++    #elseif os(Linux) || os(Android) || os(OpenBSD)
+     #if canImport(Glibc)
+     @usableFromInline
+     static let UIO_MAXIOV: Int = Int(Glibc.UIO_MAXIOV)
+@@ -513,7 +531,7 @@ internal enum Posix: Sendable {
+     static let IPTOS_ECN_ECT0: CInt = CNIODarwin_IPTOS_ECN_ECT0
+     static let IPTOS_ECN_ECT1: CInt = CNIODarwin_IPTOS_ECN_ECT1
+     static let IPTOS_ECN_CE: CInt = CNIODarwin_IPTOS_ECN_CE
+-    #elseif os(Linux) || os(FreeBSD) || os(Android)
++    #elseif os(Linux) || os(Android)
+     #if os(Android)
+     static let IPTOS_ECN_NOTECT: CInt = CInt(CNIOLinux.IPTOS_ECN_NOTECT)
+     #else
+@@ -523,7 +541,7 @@ internal enum Posix: Sendable {
+     static let IPTOS_ECN_ECT0: CInt = CInt(CNIOLinux.IPTOS_ECN_ECT0)
+     static let IPTOS_ECN_ECT1: CInt = CInt(CNIOLinux.IPTOS_ECN_ECT1)
+     static let IPTOS_ECN_CE: CInt = CInt(CNIOLinux.IPTOS_ECN_CE)
+-    #elseif os(OpenBSD)
++    #elseif os(OpenBSD) || os(FreeBSD)
+     static let IPTOS_ECN_NOTECT: CInt = CInt(CNIOOpenBSD.IPTOS_ECN_NOTECT)
+     static let IPTOS_ECN_MASK: CInt = CInt(CNIOOpenBSD.IPTOS_ECN_MASK)
+     static let IPTOS_ECN_ECT0: CInt = CInt(CNIOOpenBSD.IPTOS_ECN_ECT0)
+@@ -543,13 +561,14 @@ internal enum Posix: Sendable {
+ 
+     static let IPV6_RECVPKTINFO: CInt = CNIODarwin_IPV6_RECVPKTINFO
+     static let IPV6_PKTINFO: CInt = CNIODarwin_IPV6_PKTINFO
+-    #elseif os(Linux) || os(FreeBSD) || os(Android)
++    #elseif os(Linux) || os(Android)
+     static let IP_RECVPKTINFO: CInt = CInt(CNIOLinux.IP_PKTINFO)
+     static let IP_PKTINFO: CInt = CInt(CNIOLinux.IP_PKTINFO)
+ 
+     static let IPV6_RECVPKTINFO: CInt = CInt(CNIOLinux.IPV6_RECVPKTINFO)
+     static let IPV6_PKTINFO: CInt = CInt(CNIOLinux.IPV6_PKTINFO)
+-    #elseif os(OpenBSD)
++    #elseif os(OpenBSD) || os(FreeBSD)
++    static let IP_RECVPKTINFO: CInt = CInt(-1)  // Not actually present.
+     static let IP_PKTINFO: CInt = CInt(-1)  // Not actually present.
+ 
+     static let IPV6_RECVPKTINFO: CInt = CInt(CNIOOpenBSD.IPV6_RECVPKTINFO)
+@@ -826,7 +845,12 @@ internal enum Posix: Sendable {
+                 let result: CInt = Darwin.sendfile(fd, descriptor, offset, &w, nil, 0)
+                 written = w
+                 return ssize_t(result)
+-                #elseif os(Linux) || os(FreeBSD) || os(Android)
++                #elseif os(FreeBSD)
++                var sbytes: off_t = 0
++                let result: CInt = Glibc.sendfile(fd, descriptor, offset, count, nil, &sbytes, 0)
++                written = sbytes
++                return ssize_t(result)
++                #elseif os(Linux) || os(Android)
+                 var off: off_t = offset
+                 #if canImport(Glibc)
+                 let result: ssize_t = Glibc.sendfile(descriptor, fd, &off, count)
+@@ -1090,10 +1114,10 @@ extension Posix {
+ }
+ #endif
+ 
+-#if canImport(Darwin) || os(OpenBSD)
++#if canImport(Darwin) || os(OpenBSD) || os(FreeBSD)
+ #if canImport(Darwin)
+ internal typealias kevent_timespec = Darwin.timespec
+-#elseif os(OpenBSD)
++#elseif os(OpenBSD) || os(FreeBSD)
+ internal typealias kevent_timespec = CNIOOpenBSD.timespec
+ #else
+ #error("implementation missing")
+@@ -1109,7 +1133,7 @@ internal enum KQueue: Sendable {
+         try syscall(blocking: false) {
+             #if canImport(Darwin)
+             Darwin.kqueue()
+-            #elseif os(OpenBSD)
++            #elseif os(OpenBSD) || os(FreeBSD)
+             CNIOOpenBSD.kqueue()
+             #else
+             #error("implementation missing")
+diff --git a/Sources/NIOPosix/Thread.swift b/Sources/NIOPosix/Thread.swift
+index ea90f37d6..0e0a5ebc2 100644
+--- a/Sources/NIOPosix/Thread.swift
++++ b/Sources/NIOPosix/Thread.swift
+@@ -16,7 +16,10 @@ import NIOConcurrencyHelpers
+ 
+ #if os(Linux) || os(FreeBSD) || os(Android)
+ import CNIOLinux
+-#elseif os(OpenBSD)
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
++#elseif os(OpenBSD) || os(FreeBSD)
+ import CNIOOpenBSD
+ #elseif os(Windows)
+ import WinSDK
+diff --git a/Sources/NIOPosix/ThreadPosix.swift b/Sources/NIOPosix/ThreadPosix.swift
+index 33b72fee2..c0019ec39 100644
+--- a/Sources/NIOPosix/ThreadPosix.swift
++++ b/Sources/NIOPosix/ThreadPosix.swift
+@@ -24,7 +24,7 @@ private typealias ThreadDestructor = @convention(c) (UnsafeMutableRawPointer) ->
+ #else
+ private typealias ThreadDestructor = @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+ #endif
+-#elseif os(OpenBSD)
++#elseif os(OpenBSD) || os(FreeBSD)
+ import CNIOOpenBSD
+ 
+ private let sys_pthread_getname_np = CNIOOpenBSD_pthread_get_name_np
+@@ -55,7 +55,7 @@ private func sysPthread_create(
+     let thread = pthread_create(handle, &attr, destructor, args)
+     pthread_attr_destroy(&attr)
+     return thread
+-    #elseif os(OpenBSD)
++    #elseif os(OpenBSD) || os(FreeBSD)
+     var attr: pthread_attr_t? = .init(bitPattern: 0)
+     pthread_attr_init(&attr)
+     let thread = pthread_create(handle, &attr, destructor, args)
+diff --git a/Sources/_NIOFileSystem/DirectoryEntries.swift b/Sources/_NIOFileSystem/DirectoryEntries.swift
+index f14e4bdea..f33e7328a 100644
+--- a/Sources/_NIOFileSystem/DirectoryEntries.swift
++++ b/Sources/_NIOFileSystem/DirectoryEntries.swift
+@@ -14,6 +14,9 @@
+ 
+ import CNIODarwin
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ import NIOConcurrencyHelpers
+ import NIOCore
+ import NIOPosix
+@@ -556,6 +559,8 @@ private struct DirectoryEnumerator: Sendable {
+                 // Empty is checked for above, root can't exist within a directory, and directory
+                 // items must be a single path component.
+                 name = FilePath.Component(platformString: CNIODarwin_dirent_dname(entry))!
++                #elseif os(FreeBSD)
++                name = FilePath.Component(platformString: CNIOOpenBSD_dirent_dname(entry))!
+                 #else
+                 name = FilePath.Component(platformString: CNIOLinux_dirent_dname(entry))!
+                 #endif
+@@ -598,7 +603,11 @@ private struct DirectoryEnumerator: Sendable {
+         while entries.count < count {
+             switch Libc.ftsRead(fts) {
+             case .success(.some(let entry)):
++                #if os(FreeBSD)
++                let info = FTSInfo(rawValue: UInt16(entry.pointee.fts_info))
++                #else
+                 let info = FTSInfo(rawValue: entry.pointee.fts_info)
++                #endif
+                 switch info {
+                 case .directoryPreOrder:
+                     let entry = DirectoryEntry(path: entry.path, type: .directory)!
+diff --git a/Sources/_NIOFileSystem/FileInfo.swift b/Sources/_NIOFileSystem/FileInfo.swift
+index e5769a8e5..3ba7ce37b 100644
+--- a/Sources/_NIOFileSystem/FileInfo.swift
++++ b/Sources/_NIOFileSystem/FileInfo.swift
+@@ -19,6 +19,9 @@ import Darwin
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ import CNIOLinux
+@@ -152,6 +155,9 @@ extension FileInfo {
+         #if canImport(Darwin)
+         private static let utimeOmit = Int(UTIME_OMIT)
+         private static let utimeNow = Int(UTIME_NOW)
++        #elseif os(FreeBSD)
++        private static let utimeOmit = Int(CNIOOpenBSD_UTIME_OMIT)
++        private static let utimeNow = Int(CNIOOpenBSD_UTIME_NOW)
+         #elseif canImport(Glibc) || canImport(Musl) || canImport(Android)
+         private static let utimeOmit = Int(CNIOLinux_UTIME_OMIT)
+         private static let utimeNow = Int(CNIOLinux_UTIME_NOW)
+diff --git a/Sources/_NIOFileSystem/FileType.swift b/Sources/_NIOFileSystem/FileType.swift
+index ba0c63407..3ca72bdcf 100644
+--- a/Sources/_NIOFileSystem/FileType.swift
++++ b/Sources/_NIOFileSystem/FileType.swift
+@@ -137,7 +137,7 @@ extension FileType {
+     /// Initializes a file type from the `d_type` from `dirent`.
+     @_spi(Testing)
+     public init(direntType: UInt8) {
+-        #if canImport(Darwin) || canImport(Musl) || os(Android)
++        #if canImport(Darwin) || canImport(Musl) || os(Android) || os(FreeBSD)
+         let value = Int32(direntType)
+         #elseif canImport(Glibc)
+         let value = Int(direntType)
+diff --git a/Sources/_NIOFileSystem/Internal/System Calls/CInterop.swift b/Sources/_NIOFileSystem/Internal/System Calls/CInterop.swift
+index 2235af8a6..960d9e821 100644
+--- a/Sources/_NIOFileSystem/Internal/System Calls/CInterop.swift	
++++ b/Sources/_NIOFileSystem/Internal/System Calls/CInterop.swift	
+@@ -20,6 +20,9 @@ import CNIODarwin
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ import CNIOLinux
+@@ -73,6 +76,9 @@ extension CInterop {
+     #if canImport(Darwin)
+     typealias FTS = CNIODarwin.FTS
+     typealias FTSEnt = CNIODarwin.FTSENT
++    #elseif os(FreeBSD)
++    typealias FTS = CNIOOpenBSD.FTS
++    typealias FTSEnt = CNIOOpenBSD.FTSENT
+     #elseif canImport(Glibc) || canImport(Musl) || canImport(Android)
+     typealias FTS = CNIOLinux.FTS
+     typealias FTSEnt = CNIOLinux.FTSENT
+diff --git a/Sources/_NIOFileSystem/Internal/System Calls/FileDescriptor+Syscalls.swift b/Sources/_NIOFileSystem/Internal/System Calls/FileDescriptor+Syscalls.swift
+index 0d824fca3..204727ca2 100644
+--- a/Sources/_NIOFileSystem/Internal/System Calls/FileDescriptor+Syscalls.swift	
++++ b/Sources/_NIOFileSystem/Internal/System Calls/FileDescriptor+Syscalls.swift	
+@@ -316,7 +316,11 @@ extension FileDescriptor {
+ #if canImport(Glibc) || canImport(Musl) || canImport(Bionic)
+ extension FileDescriptor.OpenOptions {
+     static var temporaryFile: Self {
++        #if os(FreeBSD)
++        Self(rawValue: 0)  // O_TMPFILE not available on FreeBSD
++        #else
+         Self(rawValue: CNIOLinux_O_TMPFILE)
++        #endif
+     }
+ }
+ 
+diff --git a/Sources/_NIOFileSystem/Internal/System Calls/Syscall.swift b/Sources/_NIOFileSystem/Internal/System Calls/Syscall.swift
+index 5f6ed5cb7..ea6986534 100644
+--- a/Sources/_NIOFileSystem/Internal/System Calls/Syscall.swift	
++++ b/Sources/_NIOFileSystem/Internal/System Calls/Syscall.swift	
+@@ -20,6 +20,9 @@ import CNIODarwin
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ import CNIOLinux
+@@ -141,11 +144,19 @@ public enum Syscall: Sendable {
+         }
+ 
+         public static var exclusive: Self {
++            #if os(FreeBSD)
++            Self(rawValue: 0x1)  // RENAME_NOREPLACE
++            #else
+             Self(rawValue: CNIOLinux_RENAME_NOREPLACE)
++            #endif
+         }
+ 
+         public static var swap: Self {
++            #if os(FreeBSD)
++            Self(rawValue: 0x2)  // RENAME_EXCHANGE (unsupported on FreeBSD)
++            #else
+             Self(rawValue: CNIOLinux_RENAME_EXCHANGE)
++            #endif
+         }
+     }
+     #endif
+@@ -163,7 +174,11 @@ public enum Syscall: Sendable {
+ 
+         @_spi(Testing)
+         public static var emptyPath: Self {
++            #if os(FreeBSD)
++            Self(rawValue: 0x4000)  // AT_EMPTY_PATH
++            #else
+             Self(rawValue: CNIOLinux_AT_EMPTY_PATH)
++            #endif
+         }
+ 
+         @_spi(Testing)
+diff --git a/Sources/_NIOFileSystem/Internal/System Calls/Syscalls.swift b/Sources/_NIOFileSystem/Internal/System Calls/Syscalls.swift
+index 63621c21c..56350feb3 100644
+--- a/Sources/_NIOFileSystem/Internal/System Calls/Syscalls.swift	
++++ b/Sources/_NIOFileSystem/Internal/System Calls/Syscalls.swift	
+@@ -20,6 +20,9 @@ import CNIODarwin
+ #elseif canImport(Glibc)
+ @preconcurrency import Glibc
+ import CNIOLinux
++#if os(FreeBSD)
++import CNIOOpenBSD
++#endif
+ #elseif canImport(Musl)
+ @preconcurrency import Musl
+ import CNIOLinux
+@@ -177,6 +180,9 @@ internal func system_flistxattr(
+     #if canImport(Darwin)
+     // The final parameter is 'options'; there is no equivalent on Linux.
+     return flistxattr(fd, namebuf, size, 0)
++    #elseif os(FreeBSD)
++    errno = ENOTSUP
++    return -1
+     #elseif canImport(Glibc) || canImport(Musl) || canImport(Android)
+     return flistxattr(fd, namebuf, size)
+     #endif
+@@ -199,6 +205,9 @@ internal func system_fgetxattr(
+     // Penultimate parameter is position which is reserved and should be zero.
+     // The final parameter is 'options'; there is no equivalent on Linux.
+     return fgetxattr(fd, name, value, size, 0, 0)
++    #elseif os(FreeBSD)
++    errno = ENOTSUP
++    return -1
+     #elseif canImport(Glibc) || canImport(Musl) || canImport(Android)
+     return fgetxattr(fd, name, value, size)
+     #endif
+@@ -221,6 +230,9 @@ internal func system_fsetxattr(
+     #if canImport(Darwin)
+     // Penultimate parameter is position which is reserved and should be zero.
+     return fsetxattr(fd, name, value, size, 0, 0)
++    #elseif os(FreeBSD)
++    errno = ENOTSUP
++    return -1
+     #elseif canImport(Glibc) || canImport(Musl) || canImport(Android)
+     return fsetxattr(fd, name, value, size, 0)
+     #endif
+@@ -240,6 +252,9 @@ internal func system_fremovexattr(
+     #if canImport(Darwin)
+     // The final parameter is 'options'; there is no equivalent on Linux.
+     return fremovexattr(fd, name, 0)
++    #elseif os(FreeBSD)
++    errno = ENOTSUP
++    return -1
+     #elseif canImport(Glibc) || canImport(Musl) || canImport(Android)
+     return fremovexattr(fd, name)
+     #endif
+@@ -286,7 +301,12 @@ internal func system_renameat2(
+         return mock(oldFD, old, newFD, new, flags)
+     }
+     #endif
++    #if os(FreeBSD)
++    _ = flags
++    return renameat(oldFD, old, newFD, new)
++    #else
+     return CNIOLinux_renameat2(oldFD, old, newFD, new, flags)
++    #endif
+ }
+ #endif
+ 
+@@ -347,7 +367,13 @@ internal func system_sendfile(
+     }
+     #endif
+     var offset = offset
++    #if os(FreeBSD)
++    var sbytes: off_t = 0
++    let rc = sendfile(inFD, outFD, offset, count, nil, &sbytes, 0)
++    return rc == 0 ? Int(sbytes) : -1
++    #else
+     return sendfile(outFD, inFD, &offset, count)
++    #endif
+ }
+ #endif
+ 
+@@ -461,6 +487,8 @@ internal func libc_fts_open(
+     // They were added in https://android.googlesource.com/platform/bionic/+/dec8efd72a6ad8b807a15a614ae1519487cfa456,
+     // and lasted for more than a year: https://android.googlesource.com/platform/bionic/+/da81ec4d1cbd0279014feb60535bf38defcd9346.
+     CNIOLinux_fts_open(path, options, nil)!
++    #elseif os(FreeBSD)
++    CNIOOpenBSD_fts_open(path, options, nil)!
+     #else
+     fts_open(path, options, nil)!
+     #endif
+diff --git a/Sources/_NIOFileSystem/Internal/SystemFileHandle.swift b/Sources/_NIOFileSystem/Internal/SystemFileHandle.swift
+index 1e765a338..dec6c7679 100644
+--- a/Sources/_NIOFileSystem/Internal/SystemFileHandle.swift
++++ b/Sources/_NIOFileSystem/Internal/SystemFileHandle.swift
+@@ -548,9 +548,11 @@ extension SystemFileHandle.SendableView {
+                     // Okay, return empty value.
+                     return .success([])
+                 #endif
++                #if !os(FreeBSD)
+                 case .noData:
+                     // Okay, return empty value.
+                     return .success([])
++                #endif
+                 default:
+                     let error = FileSystemError.fgetxattr(
+                         attribute: name,

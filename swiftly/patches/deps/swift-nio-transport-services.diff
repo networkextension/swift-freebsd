@@ -1,0 +1,13 @@
+diff --git a/Package.swift b/Package.swift
+index 6d72eed..20066ea 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -93,7 +93,7 @@ for target in package.targets {
+     case .regular, .test, .executable:
+         var settings = target.swiftSettings ?? []
+         // https://github.com/swiftlang/swift-evolution/blob/main/proposals/0444-member-import-visibility.md
+-        settings.append(.enableUpcomingFeature("MemberImportVisibility"))
++        // [freebsd-port] disabled: settings.append(.enableUpcomingFeature("MemberImportVisibility"))
+         target.swiftSettings = settings
+     case .macro, .plugin, .system, .binary:
+         ()  // not applicable
