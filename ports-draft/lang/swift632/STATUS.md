@@ -17,6 +17,14 @@ Dispatch + XCTest + swift-testing + SwiftPM). Derived from lang/swift510.
 - `files/start-build.sh` — single `--install-all` build-script run (+ `--swift-testing-macros`,
   serialized links); documents the FreeBSD gotchas (corelibs stamping, dispatch module
   collision, SwiftPM `LLBuild_DIR`, TestingMacros) for maintainers.
+- `files/patch-swift_cmake_modules_AddSwift.cmake`, `files/patch-swift_lib_Macros_..._DebugDescriptionMacro.swift`.
+- `files/patch-swift-testing_Sources_Testing_Support_Locked.swift` — **routes swift-testing's
+  `Locked<T>` to `pthread_mutex` on FreeBSD** (adds `os(FreeBSD)` to the existing Linux/Android
+  `!SWT_FIXED_85448` branch). Without it the bundled `Synchronization.Mutex` deadlocks under
+  contention on FreeBSD/aarch64, so *any* parallel `swift test` (swift-testing) run on the
+  resulting toolchain hangs. Verified: rebuilt `libTesting.so` with this change turned a
+  reliably-hanging 200-test package into 3/3 passes, and let swiftly's own suite run. Mirrors
+  swift-testing's upstream issue 85448 workaround; should become an upstream swift-testing PR.
 - `pkg-descr`, `files/pkg-message`.
 
 ## Remaining before submission (need an aarch64 poudriere jail)
