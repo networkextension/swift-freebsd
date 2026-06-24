@@ -62,7 +62,21 @@ file /opt/freebsd15-aarch64-sysroot/usr/lib/libc.so   # → ELF 64-bit, ARM aarc
 ls  /opt/freebsd15-aarch64-sysroot/usr/lib/swift/freebsd/*.swiftmodule | wc -l   # ≥ 10
 ```
 
-### 2 Swift toolchains
+### 2 cmake + ninja
+
+`build-script` requires cmake and ninja. Install via Python venv (avoids Homebrew/proxy issues):
+
+```sh
+python3 -m venv ~/swift-build-venv
+~/swift-build-venv/bin/pip install cmake ninja
+# Verify:
+~/swift-build-venv/bin/cmake --version   # → cmake version 4.x
+~/swift-build-venv/bin/ninja --version   # → 1.x
+```
+
+Add to PATH before running any build command: `export PATH=~/swift-build-venv/bin:$PATH`
+
+### 3 Swift toolchains
 
 Download from **swift.org → Downloads → macOS**:
 
@@ -193,8 +207,19 @@ EOF
 
 ```sh
 XCTC61=~/Library/Developer/Toolchains/swift-6.3.1-RELEASE.xctoolchain
-cd ~/swift64-cross
 
+# cmake + ninja installed in venv (see setup above)
+export PATH=~/swift-build-venv/bin:$PATH
+
+# build-script reads source/build roots from env vars, not CLI flags
+export SWIFT_SOURCE_ROOT=~/swift64-cross
+export SWIFT_BUILD_ROOT=~/swift64-cross/build
+
+# CLT-only install (no /Applications/Xcode.app): skip the Xcode version gate
+export SKIP_XCODE_VERSION_CHECK=1
+
+cd ~/swift64-cross
+HTTPS_PROXY="" HTTP_PROXY="" ALL_PROXY="" \
 ./swift/utils/build-script \
   --release \
   --cross-compile-hosts=freebsd-aarch64 \
@@ -218,6 +243,7 @@ cd ~/swift64-cross
     -DCMAKE_TOOLCHAIN_FILE=$HOME/swift64-cross/freebsd-aarch64-toolchain.cmake \
     -DCMAKE_AR=${XCTC61}/usr/bin/llvm-ar \
     -DCMAKE_RANLIB=${XCTC61}/usr/bin/llvm-ranlib \
+    -DCMAKE_NM=${XCTC61}/usr/bin/llvm-nm \
     -DLLVM_PARALLEL_LINK_JOBS=4 \
     -DSWIFT_PARALLEL_LINK_JOBS=4" \
   2>&1 | tee ~/swift64-cross/build.log
