@@ -1,0 +1,19 @@
+diff --git a/utils/build-script-impl b/utils/build-script-impl
+index 404831a7d0e..6b76d89f4e9 100755
+--- a/utils/build-script-impl
++++ b/utils/build-script-impl
+@@ -2592,6 +2592,14 @@ for host in "${ALL_HOSTS[@]}"; do
+             if [[ -n "${DISTCC}" ]]; then
+                 EXTRA_DISTCC_OPTIONS=("DISTCC_HOSTS=localhost,lzo,cpp")
+             fi
++            # FreeBSD cross-compile: apply the toolchain file to every FreeBSD
++            # sub-project (LLVM, cmark, libdispatch, swift) so they build as
++            # FreeBSD aarch64 ELF. Injected at the configure call (not in the
++            # per-host option vars, which get reassigned) and scoped to the
++            # FreeBSD host so the macOS host configure stays native.
++            if [[ "${host}" == freebsd-* ]] && [[ -n "${FREEBSD_USE_TOOLCHAIN_FILE:-}" ]]; then
++                cmake_options+=( -DCMAKE_TOOLCHAIN_FILE="${FREEBSD_USE_TOOLCHAIN_FILE}" )
++            fi
+             with_pushd "${build_dir}" \
+                 call env "${EXTRA_DISTCC_OPTIONS[@]}" "${CMAKE}" "${cmake_options[@]}" "${EXTRA_CMAKE_OPTIONS[@]}" "${source_dir}"
+         fi

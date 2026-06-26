@@ -1,0 +1,157 @@
+diff --git a/stdlib/public/Concurrency/ContinuousClock.swift b/stdlib/public/Concurrency/ContinuousClock.swift
+index 9a2ca2a56b3..8b7e765c93a 100644
+--- a/stdlib/public/Concurrency/ContinuousClock.swift
++++ b/stdlib/public/Concurrency/ContinuousClock.swift
+@@ -110,7 +110,6 @@ extension ContinuousClock: Clock {
+   /// `CancellationError`.
+   ///
+   /// This function doesn't block the underlying thread.
+-  @diagnose(UselessAvailabilityCheck, as: ignored)
+   public func sleep(
+     until deadline: Instant, tolerance: Swift.Duration? = nil
+   ) async throws {
+diff --git a/stdlib/public/Concurrency/ExecutorImpl.swift b/stdlib/public/Concurrency/ExecutorImpl.swift
+index 793a6cdf1bf..6df654fed83 100644
+--- a/stdlib/public/Concurrency/ExecutorImpl.swift
++++ b/stdlib/public/Concurrency/ExecutorImpl.swift
+@@ -22,7 +22,6 @@ import Swift
+ 
+ @available(SwiftStdlib 6.2, *)
+ @_silgen_name("swift_task_asyncMainDrainQueueImpl")
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ internal func drainMainQueue() {
+   #if !SWIFT_STDLIB_TASK_TO_THREAD_MODEL_CONCURRENCY
+   if #available(StdlibDeploymentTarget 6.3, *) {
+@@ -38,7 +37,6 @@ internal func drainMainQueue() {
+ 
+ @available(SwiftStdlib 6.2, *)
+ @_silgen_name("swift_task_donateThreadToGlobalExecutorUntilImpl")
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ internal func donateToGlobalExecutor(
+   condition: @convention(c) (_ ctx: UnsafeMutableRawPointer) -> CBool,
+   context: UnsafeMutableRawPointer
+@@ -56,7 +54,6 @@ internal func donateToGlobalExecutor(
+ 
+ @available(SwiftStdlib 6.2, *)
+ @_silgen_name("swift_task_getMainExecutorImpl")
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ internal func getMainExecutor() -> UnownedSerialExecutor {
+   if #available(StdlibDeploymentTarget 6.3, *) {
+     return unsafe _getMainExecutorAsSerialExecutor()
+@@ -67,7 +64,6 @@ internal func getMainExecutor() -> UnownedSerialExecutor {
+ 
+ @available(SwiftStdlib 6.2, *)
+ @_silgen_name("swift_task_enqueueMainExecutorImpl")
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ internal func enqueueOnMainExecutor(job unownedJob: UnownedJob) {
+   #if !SWIFT_STDLIB_TASK_TO_THREAD_MODEL_CONCURRENCY
+   if #available(StdlibDeploymentTarget 6.3, *) {
+@@ -82,7 +78,6 @@ internal func enqueueOnMainExecutor(job unownedJob: UnownedJob) {
+ 
+ @available(SwiftStdlib 6.2, *)
+ @_silgen_name("swift_task_enqueueGlobalImpl")
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ internal func enqueueOnGlobalExecutor(job unownedJob: UnownedJob) {
+   if #available(StdlibDeploymentTarget 6.3, *) {
+     Task.defaultExecutor.enqueue(unownedJob)
+@@ -94,7 +89,6 @@ internal func enqueueOnGlobalExecutor(job unownedJob: UnownedJob) {
+ #if !$Embedded
+ @available(SwiftStdlib 6.2, *)
+ @_silgen_name("swift_task_enqueueGlobalWithDelayImpl")
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ internal func enqueueOnGlobalExecutor(delay: CUnsignedLongLong,
+                                       job unownedJob: UnownedJob) {
+   #if !SWIFT_STDLIB_TASK_TO_THREAD_MODEL_CONCURRENCY
+@@ -112,7 +106,6 @@ internal func enqueueOnGlobalExecutor(delay: CUnsignedLongLong,
+ 
+ @available(SwiftStdlib 6.2, *)
+ @_silgen_name("swift_task_enqueueGlobalWithDeadlineImpl")
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ internal func enqueueOnGlobalExecutor(seconds: CLongLong,
+                                       nanoseconds: CLongLong,
+                                       leewaySeconds: CLongLong,
+diff --git a/stdlib/public/Concurrency/GlobalConcurrentExecutor.swift b/stdlib/public/Concurrency/GlobalConcurrentExecutor.swift
+index 98ad98519fe..c4f21c96d4a 100644
+--- a/stdlib/public/Concurrency/GlobalConcurrentExecutor.swift
++++ b/stdlib/public/Concurrency/GlobalConcurrentExecutor.swift
+@@ -32,7 +32,6 @@ import Swift
+ /// Customizing the global concurrent executor is currently not supported.
+ @available(SwiftStdlib 6.0, *)
+ @_unavailableInEmbedded
+-@diagnose(UselessAvailabilityCheck, as: ignored)
+ public var globalConcurrentExecutor: any TaskExecutor {
+   get {
+     if #available(StdlibDeploymentTarget 6.3, *) {
+diff --git a/stdlib/public/Concurrency/PartialAsyncTask.swift b/stdlib/public/Concurrency/PartialAsyncTask.swift
+index c53b5da2a72..f129489241c 100644
+--- a/stdlib/public/Concurrency/PartialAsyncTask.swift
++++ b/stdlib/public/Concurrency/PartialAsyncTask.swift
+@@ -86,7 +86,6 @@ public struct UnownedJob: Sendable {
+ 
+   /// The priority of this job.
+   @available(StdlibDeploymentTarget 5.9, *)
+-  @diagnose(UselessAvailabilityCheck, as: ignored)
+   public var priority: JobPriority {
+     let raw: UInt8
+     if #available(StdlibDeploymentTarget 6.3, *) {
+diff --git a/stdlib/public/Concurrency/SuspendingClock.swift b/stdlib/public/Concurrency/SuspendingClock.swift
+index d07a5b20c7e..3224339553c 100644
+--- a/stdlib/public/Concurrency/SuspendingClock.swift
++++ b/stdlib/public/Concurrency/SuspendingClock.swift
+@@ -98,7 +98,6 @@ extension SuspendingClock: Clock {
+   ///
+   /// This function doesn't block the underlying thread.
+   @available(StdlibDeploymentTarget 5.7, *)
+-  @diagnose(UselessAvailabilityCheck, as: ignored)
+   public func sleep(
+     until deadline: Instant, tolerance: Swift.Duration? = nil
+   ) async throws {
+diff --git a/stdlib/public/Observation/Sources/Observation/ContinuousObservation.swift b/stdlib/public/Observation/Sources/Observation/ContinuousObservation.swift
+index 045c2db7e3d..72960dba014 100644
+--- a/stdlib/public/Observation/Sources/Observation/ContinuousObservation.swift
++++ b/stdlib/public/Observation/Sources/Observation/ContinuousObservation.swift
+@@ -160,16 +160,6 @@ extension ContinuousObservation.State {
+     while await track(state, options: options, apply: apply) {}
+   }
+ 
+-  @diagnose(
+-    DeprecatedDeclaration,
+-    as: ignored,
+-    reason: "https://github.com/swiftlang/swift/issues/89045"
+-  )
+-  @diagnose(
+-    ConversionFromIsolatedAnyToSynchronous,
+-    as: ignored,
+-    reason: "https://github.com/swiftlang/swift/issues/89361"
+-  )
+   fileprivate static func track(
+     _ state: _ManagedCriticalState<ContinuousObservation.State>,
+     options: ObservationTracking.Options,
+diff --git a/stdlib/public/Observation/Sources/Observation/Observations.swift b/stdlib/public/Observation/Sources/Observation/Observations.swift
+index 166e2099c30..df83572eaed 100644
+--- a/stdlib/public/Observation/Sources/Observation/Observations.swift
++++ b/stdlib/public/Observation/Sources/Observation/Observations.swift
+@@ -173,11 +173,6 @@ public struct Observations<Element: Sendable, Failure: Error>: AsyncSequence, Se
+     
+     // this is the primary implementation of the tracking
+     // it is bound to be called on the specified isolation of the construction
+-    @diagnose(
+-      ConversionFromIsolatedAnyToSynchronous,
+-      as: ignored,
+-      reason: "https://github.com/swiftlang/swift/issues/89361"
+-    )
+     fileprivate static func trackEmission(isolation trackingIsolation: isolated (any Actor)?, state: _ManagedCriticalState<State>, emit: Emit) throws(Failure) -> Iteration {
+       // this ferries in an intermediate form with Result to skip over `withObservationTracking` not handling errors being thrown
+       // particularly this case is that the error is also an iteration state transition data point (it terminates the sequence)
+diff --git a/stdlib/public/core/StringWordBreaking.swift b/stdlib/public/core/StringWordBreaking.swift
+index 78c8fbf0fcc..08f193ea259 100644
+--- a/stdlib/public/core/StringWordBreaking.swift
++++ b/stdlib/public/core/StringWordBreaking.swift
+@@ -706,7 +706,6 @@ extension String {
+   ///     string.
+   /// - Returns: The first word break strictly following `i` in the string.
+   @available(StdlibDeploymentTarget 5.7, *)
+-  @diagnose(UselessAvailabilityCheck, as: ignored)
+   public func _wordIndex(after i: String.Index) -> String.Index {
+     guard #available(StdlibDeploymentTarget 6.3, *) else {
+       fatalError("Unreachable")
